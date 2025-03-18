@@ -1,0 +1,83 @@
+from step_type import StepType
+
+class Step:
+    def __init__(self, step_id: int, type: StepType, next_step_id: int = -1):
+        self.id = step_id
+        self.type = type
+        self.next_step_id = next_step_id
+
+    def __str__(self):
+        return f'{self.id} {self.type.name}' + (f' -> {self.next_step_id}' if self.next_step_id != -1 else '')
+    
+class GoToUrlStep(Step):
+    def __init__(self, step_id: int, url: str, next_step_id: int = -1):
+        super().__init__(step_id, StepType.GOTO_URL, next_step_id)
+        self.url = url
+
+    def __str__(self):
+        return f'{self.id} {self.type.name} "{self.url}"' + (f' -> {self.next_step_id}' if self.next_step_id != -1 else '')
+
+class IfExistsStep(Step):
+    def __init__(self, step_id: int, selector: str, next_step_id_true: int, next_step_id_false: int):
+        super().__init__(step_id, StepType.IF_EXISTS)
+        self.selector = selector
+        self.next_step_id_true = next_step_id_true
+        self.next_step_id_false = next_step_id_false
+
+    def __str__(self):
+        return f'{self.id} {self.type.name} "{self.selector}" ? {self.next_step_id_true} : {self.next_step_id_false}'
+
+class ExtractStep(Step):
+    def __init__(self, step_id: int, selector: str, field_name: str, next_step_id: int = -1):
+        super().__init__(step_id, StepType.EXTRACT, next_step_id)
+        self.selector = selector
+        self.variable = field_name
+
+    def __str__(self):
+        return f'{self.id} {self.type.name} "{self.variable}" "{self.selector}"' + (f' -> {self.next_step_id}' if self.next_step_id != -1 else '')
+
+class ClickStep(Step):
+    def __init__(self, step_id: int, selector: str, next_step_id: int = -1):
+        super().__init__(step_id, StepType.CLICK, next_step_id)
+        self.selector = selector
+
+    def __str__(self):
+        return f'{self.id} {self.type.name} "{self.selector}"' + (f' -> {self.next_step_id}' if self.next_step_id != -1 else '')
+
+# class ForeachStep(Step):
+#     def __init__(self, step_id: int, selector: str, steps: list, next_step_id: int = -1):
+#         super().__init__(step_id, StepType.FOREACH, next_step_id)
+#         self.selector = selector
+#         self.steps = steps
+
+#     def __str__(self):
+#         return f'{self.id} {self.type.name} {self.selector}'
+
+class SaveRowStep(Step):
+    def __init__(self, step_id: int, next_step_id: int = -1):
+        super().__init__(step_id, StepType.SAVE_ROW, next_step_id)
+
+    def __str__(self):
+        return f'{self.id} {self.type.name}' + (f' -> {self.next_step_id}' if self.next_step_id != -1 else '')
+
+class GotoStep(Step):
+    def __init__(self, step_id: int, next_step_id: int):
+        super().__init__(step_id, StepType.GOTO, next_step_id)
+
+    def __str__(self):
+        return f'{self.id} {self.type.name} {self.next_step_id}'
+    
+class LogStep(Step):
+    def __init__(self, step_id: int, message: str, next_step_id: int = -1):
+        super().__init__(step_id, StepType.LOG, next_step_id)
+        self.message = message
+
+    def __str__(self):
+        return f'{self.id} {self.type.name} "{self.message}"' + (f' -> {self.next_step_id}' if self.next_step_id != -1 else '')
+
+class EndStep(Step):
+    def __init__(self, step_id: int):
+        super().__init__(step_id, StepType.END)
+
+    def __str__(self):
+        return f'{self.id} {self.type.name}'
