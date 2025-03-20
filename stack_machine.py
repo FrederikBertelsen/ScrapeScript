@@ -21,7 +21,7 @@ class StackMachine:
         data = []
         current_row = {}
 
-        current_step = self.steps_by_id[0]
+        current_step = self.steps_by_id[1]
         while current_step.type != StepType.END:
             if self.verbose:
                 print(f"Executing: {current_step}")
@@ -47,9 +47,9 @@ class StackMachine:
             if current_step is None:
                 raise Exception(f"Step {next_step_id} not found in memory")
             
-            sleep(1)
+            # sleep(1)
         
         if self.verbose:
             print()
-            
+
         return data

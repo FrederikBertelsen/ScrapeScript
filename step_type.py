@@ -7,6 +7,6 @@ class StepType(Enum):
     CLICK = "CLICK"
     # FOREACH = "FOREACH"
     SAVE_ROW = "SAVE_ROW"
-    GOTO = "GOTO"
+    GOTO_LINE = "GOTO_LINE"
     LOG = "LOG"
     END = "END"

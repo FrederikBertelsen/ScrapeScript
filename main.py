@@ -23,7 +23,10 @@ def main():
         execute_script(args)
         
     except Exception as e:
+        import traceback
         print(f"Error executing script: {e}")
+        print("\nTraceback:")
+        traceback.print_exc()
         sys.exit(1)
 
 

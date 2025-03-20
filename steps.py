@@ -28,6 +28,7 @@ class GoToUrlStep(Step):
     
     def execute_and_get_next_step(self, page: Page, row: dict) -> int:
         page.goto(self.url)
+        page.wait_for_load_state('networkidle')
         return self.next_step_id
         
 
@@ -77,6 +78,7 @@ class ClickStep(Step):
         if not element:
             raise Exception(f'Element not found: {self.selector}')
         element.click()
+        page.wait_for_load_state('networkidle')
         return self.next_step_id
     
 # class ForeachStep(Step):
@@ -88,9 +90,9 @@ class ClickStep(Step):
 #     def __str__(self):
 #         return f'{self.id} {self.type.name} {self.selector}'
 
-class GotoStep(Step):
+class GotoLineStep(Step):
     def __init__(self, step_id: int, next_step_id: int):
-        super().__init__(step_id, StepType.GOTO, next_step_id)
+        super().__init__(step_id, StepType.GOTO_LINE, next_step_id)
 
     def __str__(self):
         return f'{self.id} {self.type.name} {self.next_step_id}'

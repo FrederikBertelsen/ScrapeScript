@@ -12,6 +12,7 @@ def load_file(file) -> list[str]:
 
 def parse_file(file_path: str) -> list[Step]:
     step_list = []
+    step_id_incremental = 0
 
     lines = load_file(file_path)
     for line in lines:
@@ -19,20 +20,22 @@ def parse_file(file_path: str) -> list[Step]:
         if line == '':
             continue
 
+        step_id_incremental += 1
+
         # First extract the step id and type
-        match = re.match(r'^(\d+) +([A-Z_]+)(?: +(.*?)(?: +-> +(\d+))?)?$', line)
+        match = re.match(r'^(\w+)(?: +(.*?)(?: +-> +(\d+))?)?$', line)
         if not match:
             print(f'Error parsing line: {line}')
             continue
-        step_id = int(match.group(1))
-        step_type_str = match.group(2)
-        args = match.group(3) if match.group(3) else ""
-        next_step_id = int(match.group(4)) if match.group(4) else -1
+        step_type_str = match.group(1)
+        args = match.group(2) if match.group(2) else ""
+        next_step_id = int(match.group(3)) if match.group(3) else -1
 
         try:
-            step_type = StepType(step_type_str)
+            step_type = StepType(step_type_str.upper())
         except ValueError:
-            print(f"Unknown step type string: {step_type_str}")
+            print(f"Unknown step type string: '{step_type_str}' on line: {step_id_incremental}")
+            exit(1)
             continue
 
         match step_type:
@@ -42,7 +45,7 @@ def parse_file(file_path: str) -> list[Step]:
                     print(f'Error parsing GOTO_URL: {line}')
                     continue
                 url = match.group(1).strip()
-                goto_url_step = GoToUrlStep(step_id, url, next_step_id)
+                goto_url_step = GoToUrlStep(step_id_incremental, url, next_step_id)
                 step_list.append(goto_url_step)
                 
             case StepType.IF_EXISTS:
@@ -53,7 +56,7 @@ def parse_file(file_path: str) -> list[Step]:
                 selector = match.group(1).strip()
                 next_step_id_true = int(match.group(2))
                 next_step_id_false = int(match.group(3))
-                if_exists_step = IfExistsStep(step_id, selector, next_step_id_true, next_step_id_false)
+                if_exists_step = IfExistsStep(step_id_incremental, selector, next_step_id_true, next_step_id_false)
                 step_list.append(if_exists_step)
                 
             case StepType.EXTRACT:
@@ -63,7 +66,7 @@ def parse_file(file_path: str) -> list[Step]:
                     continue
                 field_name = match.group(1).strip()
                 selector = match.group(2).strip()
-                extract_step = ExtractStep(step_id, selector, field_name, next_step_id)
+                extract_step = ExtractStep(step_id_incremental, selector, field_name, next_step_id)
                 step_list.append(extract_step)
                 
             case StepType.CLICK:
@@ -72,22 +75,22 @@ def parse_file(file_path: str) -> list[Step]:
                     print(f'Error parsing CLICK: {line}')
                     continue
                 selector = match.group(1).strip()
-                click_step = ClickStep(step_id, selector, next_step_id)
+                click_step = ClickStep(step_id_incremental, selector, next_step_id)
                 step_list.append(click_step)
                 
             case StepType.SAVE_ROW:
-                save_row_step = SaveRowStep(step_id, next_step_id)
+                save_row_step = SaveRowStep(step_id_incremental, next_step_id)
                 step_list.append(save_row_step)
                 
-            case StepType.GOTO:
+            case StepType.GOTO_LINE:
                 match = re.match(r'(\d+)', args)
                 if not match:
-                    print(f'Error parsing GOTO: {line}')
+                    print(f'Error parsing GOTO_LINE: {line}')
                     continue
                 next_step_id = int(match.group(1))
 
-                goto_step = GotoStep(step_id, next_step_id)
-                step_list.append(goto_step)
+                goto_line_step = GotoLineStep(step_id_incremental, next_step_id)
+                step_list.append(goto_line_step)
                 
             case StepType.LOG:
                 match = re.match(r'"([^"]+)"', args)
@@ -95,14 +98,15 @@ def parse_file(file_path: str) -> list[Step]:
                     print(f'Error parsing LOG: {line}')
                     continue
                 message = match.group(1).strip()
-                log_step = LogStep(step_id, message, next_step_id)
+                log_step = LogStep(step_id_incremental, message, next_step_id)
                 step_list.append(log_step)
                 
             case StepType.END:
-                end_step = EndStep(step_id)
+                end_step = EndStep(step_id_incremental)
                 step_list.append(end_step)
                 
             case _:
                 print(f"Unknown step type: {step_type}")
+            
         
     return step_list
