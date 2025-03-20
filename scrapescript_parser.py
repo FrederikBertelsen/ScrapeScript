@@ -10,10 +10,10 @@ def load_file(file) -> list[str]:
         content = f.readlines()
     return content
 
-def parse_file(file) -> list[Step]:
+def parse_file(file_path: str) -> list[Step]:
     step_list = []
 
-    lines = load_file(file)
+    lines = load_file(file_path)
     for line in lines:
         line = line.strip()
         if line == '':
@@ -106,9 +106,3 @@ def parse_file(file) -> list[Step]:
                 print(f"Unknown step type: {step_type}")
         
     return step_list
-    
-if __name__ == '__main__':
-    steps = parse_file('example.c')
-
-    for step in steps:
-        print(step)
