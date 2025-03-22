@@ -3,9 +3,19 @@ from enum import Enum, auto
 from dataclasses import dataclass
 
 class TokenType(Enum):
-    IDENTIFIER = auto()      # goto_url, extract, etc.
+    IDENTIFIER = auto()      # goto_url, extract, exists, etc.
     STRING = auto()          # 'text inside quotes'
     NEWLINE = auto()         # Line break
+    IF = auto()              # if keyword
+    ELSEIF = auto()          # elseif keyword
+    ELSE = auto()            # else keyword
+    ENDIF = auto()           # endif keyword
+    AND = auto()             # and operator
+    OR = auto()              # or operator
+    NOT = auto()             # not operator
+    LPAREN = auto()          # (
+    RPAREN = auto()          # )
+    COMMA = auto()           # ,
     EOF = auto()             # End of file
 
 @dataclass
@@ -16,6 +26,17 @@ class Token:
     column: int
 
 class Lexer:
+    # Reserved keywords
+    RESERVED_KEYWORDS = {
+        'if': TokenType.IF,
+        'elseif': TokenType.ELSEIF,
+        'else': TokenType.ELSE,
+        'endif': TokenType.ENDIF,
+        'and': TokenType.AND,
+        'or': TokenType.OR,
+        'not': TokenType.NOT,
+    }
+
     def __init__(self, text):
         self.text = text
         self.pos = 0
@@ -41,8 +62,17 @@ class Lexer:
         while self.current_char and self.current_char.isspace() and self.current_char != '\n':
             self.advance()
 
+    def skip_comment(self):
+        """Skip comment (from # to end of line)."""
+        # Skip the # character
+        self.advance()
+        
+        # Skip all characters until we reach the end of line or end of file
+        while self.current_char and self.current_char != '\n':
+            self.advance()
+
     def identifier(self):
-        """Read an identifier (command name)."""
+        """Read an identifier (command name or keyword)."""
         result = ''
         start_column = self.column
         
@@ -50,7 +80,9 @@ class Lexer:
             result += self.current_char
             self.advance()
             
-        return Token(TokenType.IDENTIFIER, result, self.line, start_column)
+        # Check if this is a reserved keyword
+        token_type = self.RESERVED_KEYWORDS.get(result.lower(), TokenType.IDENTIFIER)
+        return Token(token_type, result, self.line, start_column)
 
     def string(self):
         """Read a string literal."""
@@ -91,6 +123,11 @@ class Lexer:
                 self.skip_whitespace()
                 continue
                 
+            # Skip comments
+            if self.current_char == '#':
+                self.skip_comment()
+                continue
+                
             # Handle newlines
             if self.current_char == '\n':
                 token = Token(TokenType.NEWLINE, '\n', self.line, self.column)
@@ -104,6 +141,23 @@ class Lexer:
             # Handle string literals
             if self.current_char in ('"', "'"):
                 return self.string()
+                
+            # Handle parentheses
+            if self.current_char == '(':
+                token = Token(TokenType.LPAREN, '(', self.line, self.column)
+                self.advance()
+                return token
+                
+            if self.current_char == ')':
+                token = Token(TokenType.RPAREN, ')', self.line, self.column)
+                self.advance()
+                return token
+                
+            # Handle comma
+            if self.current_char == ',':
+                token = Token(TokenType.COMMA, ',', self.line, self.column)
+                self.advance()
+                return token
                 
             # If we get here, we have an invalid character
             raise SyntaxError(f"Invalid character '{self.current_char}' at line {self.line}, column {self.column}")

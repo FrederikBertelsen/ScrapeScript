@@ -1,5 +1,5 @@
 import asyncio
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple, Optional
 from playwright.async_api import async_playwright
 from parser import NodeType, ASTNode
 
@@ -15,22 +15,34 @@ class Interpreter:
         await page.goto(url)
         print(f"Navigated to: {url}")
 
+    async def try_selectors(self, selectors, page):
+        """Try multiple selectors until one works, returning the first successful element or None."""
+        for selector in selectors:
+            try:
+                element = await page.query_selector(selector)
+                if element:
+                    return element, selector
+            except Exception as e:
+                print(f"Error with selector '{selector}': {e}")
+        return None, None
+
     async def execute_extract(self, node, page):
-        """Execute an extract statement."""
+        """Execute an extract statement with multiple selector options."""
         column_name = node.column_name
-        selector = node.selector
+        selectors = node.selectors
         
-        try:
-            element = await page.query_selector(selector)
-            if element:
+        element, used_selector = await self.try_selectors(selectors, page)
+        
+        if element:
+            try:
                 text = await element.inner_text()
                 self.current_row[column_name] = text
-                print(f"Extracted '{column_name}': {text}")
-            else:
-                print(f"Warning: Selector '{selector}' not found")
+                print(f"Extracted '{column_name}' using selector '{used_selector}': {text}")
+            except Exception as e:
+                print(f"Error extracting text from '{used_selector}': {e}")
                 self.current_row[column_name] = None
-        except Exception as e:
-            print(f"Error extracting '{column_name}': {e}")
+        else:
+            print(f"Warning: None of the selectors for '{column_name}' were found")
             self.current_row[column_name] = None
 
     async def execute_save_row(self, node, page):
@@ -43,6 +55,103 @@ class Interpreter:
             print("Warning: Saving empty row")
             self.rows.append({})
 
+    async def evaluate_condition_exists(self, node, page):
+        """Evaluate an exists condition with multiple selector options."""
+        selectors = node.selectors
+        element, used_selector = await self.try_selectors(selectors, page)
+        exists = element is not None
+        
+        if exists:
+            print(f"Found element using selector: '{used_selector}'")
+        else:
+            print(f"None of the selectors were found: {selectors}")
+            
+        return exists
+
+    async def evaluate_condition_and(self, node, page):
+        """Evaluate an AND condition."""
+        left_result = await self.evaluate_condition(node.left, page)
+        if not left_result:  # Short-circuit evaluation
+            return False
+        return await self.evaluate_condition(node.right, page)
+
+    async def evaluate_condition_or(self, node, page):
+        """Evaluate an OR condition."""
+        left_result = await self.evaluate_condition(node.left, page)
+        if left_result:  # Short-circuit evaluation
+            return True
+        return await self.evaluate_condition(node.right, page)
+
+    async def evaluate_condition_not(self, node, page):
+        """Evaluate a NOT condition."""
+        result = await self.evaluate_condition(node.operand, page)
+        return not result
+
+    async def evaluate_condition(self, node, page):
+        """Evaluate a condition and return True or False."""
+        if node.type == NodeType.CONDITION_EXISTS:
+            return await self.evaluate_condition_exists(node, page)
+        elif node.type == NodeType.CONDITION_AND:
+            return await self.evaluate_condition_and(node, page)
+        elif node.type == NodeType.CONDITION_OR:
+            return await self.evaluate_condition_or(node, page)
+        elif node.type == NodeType.CONDITION_NOT:
+            return await self.evaluate_condition_not(node, page)
+        else:
+            raise ValueError(f"Unknown condition type: {node.type}")
+
+    async def execute_if(self, node, page):
+        """Execute an if statement with optional elseif and else clauses."""
+        # Check the main condition first
+        condition_result = await self.evaluate_condition(node.condition, page)
+        print(f"If condition evaluated to: {condition_result}")
+        
+        if condition_result:
+            # Execute the true branch
+            for statement in node.true_branch:
+                continue_execution = await self.execute_node(statement, page)
+                if not continue_execution:
+                    return False
+        elif node.elseif_branches:
+            # Try each elseif branch in order
+            executed_elseif = False
+            for elseif_condition, elseif_statements in node.elseif_branches:
+                elseif_result = await self.evaluate_condition(elseif_condition, page)
+                print(f"Elseif condition evaluated to: {elseif_result}")
+                
+                if elseif_result:
+                    # Execute this elseif branch
+                    executed_elseif = True
+                    for statement in elseif_statements:
+                        continue_execution = await self.execute_node(statement, page)
+                        if not continue_execution:
+                            return False
+                    break  # Exit after executing the first matching elseif
+            
+            # If no elseif branch was executed and there's an else branch, execute it
+            if not executed_elseif and node.false_branch:
+                for statement in node.false_branch:
+                    continue_execution = await self.execute_node(statement, page)
+                    if not continue_execution:
+                        return False
+        elif node.false_branch:
+            # No elseif branches or none matched, so execute the else branch if it exists
+            for statement in node.false_branch:
+                continue_execution = await self.execute_node(statement, page)
+                if not continue_execution:
+                    return False
+                    
+        return True  # Continue execution
+
+
+    async def execute_set_field(self, node, page):
+        """Execute a set_field statement."""
+        column_name = node.column_name
+        value = node.value
+        
+        self.current_row[column_name] = value
+        print(f"Set field '{column_name}' to: {value}")
+
     async def execute_node(self, node, page):
         """Execute a single AST node."""
         if node.type == NodeType.GOTO_URL:
@@ -51,6 +160,10 @@ class Interpreter:
             await self.execute_extract(node, page)
         elif node.type == NodeType.SAVE_ROW:
             await self.execute_save_row(node, page)
+        elif node.type == NodeType.SET_FIELD:
+            await self.execute_set_field(node, page)
+        elif node.type == NodeType.IF:
+            return await self.execute_if(node, page)
         elif node.type == NodeType.EXIT:
             return False  # Signal to stop execution
         return True  # Continue execution
