@@ -6,8 +6,9 @@ from lexer import TokenType, Token
 class NodeType(Enum):
     GOTO_URL = auto()
     EXTRACT = auto()
+    EXTRACT_ATTRIBUTE = auto()
     SAVE_ROW = auto()
-    SET_FIELD = auto()  # New node type for set_field
+    SET_FIELD = auto()
     EXIT = auto()
     PROGRAM = auto() 
     IF = auto()      
@@ -26,11 +27,12 @@ class ASTNode:
     url: Optional[str] = None  # For GOTO_URL
     column_name: Optional[str] = None  # For EXTRACT and SET_FIELD
     value: Optional[str] = None  # For SET_FIELD
+    attribute: Optional[str] = None  # For EXTRACT_ATTRIBUTE
     selector: Optional[str] = None  # For single selector nodes
     selectors: Optional[List[str]] = None  # For nodes that support multiple selectors
     condition: Optional[Any] = None  # For IF nodes
     true_branch: Optional[List[Any]] = None  # For IF nodes
-    elseif_branches: Optional[List[Tuple[Any, List[Any]]]] = None  # For IF nodes with elseif
+    else_if_branches: Optional[List[Tuple[Any, List[Any]]]] = None  # For IF nodes with else_if
     false_branch: Optional[List[Any]] = None  # For IF nodes
     left: Optional[Any] = None  # For logical operations
     right: Optional[Any] = None  # For logical operations
@@ -212,7 +214,7 @@ class Parser:
         return node
 
     def parse_if_statement(self):
-        """Parse an if statement with optional elseif and else clauses."""
+        """Parse an if statement with optional else_if and else clauses."""
         token = self.current_token
         self.eat(TokenType.IF)
         
@@ -228,36 +230,36 @@ class Parser:
         true_branch = []
         while (self.current_token and 
                self.current_token.type not in 
-               (TokenType.ENDIF, TokenType.ELSE, TokenType.ELSEIF)):
+               (TokenType.END_IF, TokenType.ELSE, TokenType.ELSE_IF)):
             statement = self.parse_statement()
             if statement:
                 true_branch.append(statement)
             self.skip_newlines()
         
-        # Parse any elseif branches
-        elseif_branches = []
-        while self.current_token and self.current_token.type == TokenType.ELSEIF:
-            self.eat(TokenType.ELSEIF)
+        # Parse any else_if branches
+        else_if_branches = []
+        while self.current_token and self.current_token.type == TokenType.ELSE_IF:
+            self.eat(TokenType.ELSE_IF)
             
-            # Parse the elseif condition
-            elseif_condition = self.parse_condition()
+            # Parse the else_if condition
+            else_if_condition = self.parse_condition()
             
             # We expect at least one newline after the condition
             if self.current_token.type != TokenType.NEWLINE:
-                raise SyntaxError(f"Expected newline after elseif condition at line {self.current_token.line}")
+                raise SyntaxError(f"Expected newline after else_if condition at line {self.current_token.line}")
             self.skip_newlines()  # Skip all consecutive newlines
             
-            # Parse the elseif branch statements
-            elseif_statements = []
+            # Parse the else_if branch statements
+            else_if_statements = []
             while (self.current_token and 
                    self.current_token.type not in 
-                   (TokenType.ENDIF, TokenType.ELSE, TokenType.ELSEIF)):
+                   (TokenType.END_IF, TokenType.ELSE, TokenType.ELSE_IF)):
                 statement = self.parse_statement()
                 if statement:
-                    elseif_statements.append(statement)
+                    else_if_statements.append(statement)
                 self.skip_newlines()
                 
-            elseif_branches.append((elseif_condition, elseif_statements))
+            else_if_branches.append((else_if_condition, else_if_statements))
         
         # Parse the else branch if it exists
         false_branch = []
@@ -265,14 +267,14 @@ class Parser:
             self.eat(TokenType.ELSE)
             self.skip_newlines()  # Skip newlines after else
             
-            while self.current_token and self.current_token.type != TokenType.ENDIF:
+            while self.current_token and self.current_token.type != TokenType.END_IF:
                 statement = self.parse_statement()
                 if statement:
                     false_branch.append(statement)
                 self.skip_newlines()
         
-        # We expect endif at the end of the if statement
-        self.eat(TokenType.ENDIF)
+        # We expect end_if at the end of the if statement
+        self.eat(TokenType.END_IF)
         
         return ASTNode(
             type=NodeType.IF,
@@ -280,7 +282,7 @@ class Parser:
             column=token.column,
             condition=condition,
             true_branch=true_branch,
-            elseif_branches=elseif_branches if elseif_branches else None,
+            else_if_branches=else_if_branches if else_if_branches else None,
             false_branch=false_branch if false_branch else None
         )
 
@@ -300,6 +302,27 @@ class Parser:
             column_name=column_name_token.value,
             value=value_token.value
         )
+
+    def parse_extract_attribute(self):
+        """Parse an extract_attribute statement."""
+        token = self.current_token
+        self.eat(TokenType.IDENTIFIER)  # Eat 'extract_attribute'
+        
+        # We expect two string arguments (column name, attribute)
+        column_name_token = self.eat(TokenType.STRING)
+        attribute_token = self.eat(TokenType.STRING)
+        
+        # Parse the selector list
+        selectors = self.parse_selector_list()
+        
+        return ASTNode(
+            type=NodeType.EXTRACT_ATTRIBUTE,
+            line=token.line,
+            column=token.column,
+            column_name=column_name_token.value,
+            attribute=attribute_token.value,
+            selectors=selectors
+        )
     
     def parse_statement(self):
         """Parse a single statement."""
@@ -311,6 +334,8 @@ class Parser:
                 return self.parse_goto_url()
             elif self.current_token.value == 'extract':
                 return self.parse_extract()
+            elif self.current_token.value == 'extract_attribute':
+                return self.parse_extract_attribute()
             elif self.current_token.value == 'save_row':
                 return self.parse_save_row()
             elif self.current_token.value == 'set_field':

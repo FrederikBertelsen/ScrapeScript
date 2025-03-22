@@ -45,6 +45,25 @@ class Interpreter:
             print(f"Warning: None of the selectors for '{column_name}' were found")
             self.current_row[column_name] = None
 
+    async def execute_extract_attribute(self, node, page):
+        """Execute an extract_attribute statement with multiple selector options."""
+        column_name = node.column_name
+        selectors = node.selectors
+        
+        element, used_selector = await self.try_selectors(selectors, page)
+        
+        if element:
+            try:
+                attribute_text = await element.get_attribute(node.attribute)
+                self.current_row[column_name] = attribute_text
+                print(f"Extracted '{column_name}' using selector '{used_selector}' with attribute '{node.attribute}': {attribute_text}")
+            except Exception as e:
+                print(f"Error extracting attribute '{node.attribute}' from '{used_selector}': {e}")
+                self.current_row[column_name] = None
+        else:
+            print(f"Warning: None of the selectors for '{column_name}' were found")
+            self.current_row[column_name] = None
+
     async def execute_save_row(self, node, page):
         """Execute a save_row statement."""
         if self.current_row:
@@ -101,7 +120,7 @@ class Interpreter:
             raise ValueError(f"Unknown condition type: {node.type}")
 
     async def execute_if(self, node, page):
-        """Execute an if statement with optional elseif and else clauses."""
+        """Execute an if statement with optional else_if and else clauses."""
         # Check the main condition first
         condition_result = await self.evaluate_condition(node.condition, page)
         print(f"If condition evaluated to: {condition_result}")
@@ -112,30 +131,30 @@ class Interpreter:
                 continue_execution = await self.execute_node(statement, page)
                 if not continue_execution:
                     return False
-        elif node.elseif_branches:
-            # Try each elseif branch in order
-            executed_elseif = False
-            for elseif_condition, elseif_statements in node.elseif_branches:
-                elseif_result = await self.evaluate_condition(elseif_condition, page)
-                print(f"Elseif condition evaluated to: {elseif_result}")
+        elif node.else_if_branches:
+            # Try each else_if branch in order
+            executed_else_if = False
+            for else_if_condition, else_if_statements in node.else_if_branches:
+                else_if_result = await self.evaluate_condition(else_if_condition, page)
+                print(f"Elseif condition evaluated to: {else_if_result}")
                 
-                if elseif_result:
-                    # Execute this elseif branch
-                    executed_elseif = True
-                    for statement in elseif_statements:
+                if else_if_result:
+                    # Execute this else_if branch
+                    executed_else_if = True
+                    for statement in else_if_statements:
                         continue_execution = await self.execute_node(statement, page)
                         if not continue_execution:
                             return False
-                    break  # Exit after executing the first matching elseif
+                    break  # Exit after executing the first matching else_if
             
-            # If no elseif branch was executed and there's an else branch, execute it
-            if not executed_elseif and node.false_branch:
+            # If no else_if branch was executed and there's an else branch, execute it
+            if not executed_else_if and node.false_branch:
                 for statement in node.false_branch:
                     continue_execution = await self.execute_node(statement, page)
                     if not continue_execution:
                         return False
         elif node.false_branch:
-            # No elseif branches or none matched, so execute the else branch if it exists
+            # No else_if branches or none matched, so execute the else branch if it exists
             for statement in node.false_branch:
                 continue_execution = await self.execute_node(statement, page)
                 if not continue_execution:
@@ -158,6 +177,8 @@ class Interpreter:
             await self.execute_goto_url(node, page)
         elif node.type == NodeType.EXTRACT:
             await self.execute_extract(node, page)
+        elif node.type == NodeType.EXTRACT_ATTRIBUTE:
+            await self.execute_extract_attribute(node, page)
         elif node.type == NodeType.SAVE_ROW:
             await self.execute_save_row(node, page)
         elif node.type == NodeType.SET_FIELD:

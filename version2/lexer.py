@@ -7,9 +7,9 @@ class TokenType(Enum):
     STRING = auto()          # 'text inside quotes'
     NEWLINE = auto()         # Line break
     IF = auto()              # if keyword
-    ELSEIF = auto()          # elseif keyword
+    ELSE_IF = auto()          # else_if keyword
     ELSE = auto()            # else keyword
-    ENDIF = auto()           # endif keyword
+    END_IF = auto()           # end_if keyword
     AND = auto()             # and operator
     OR = auto()              # or operator
     NOT = auto()             # not operator
@@ -29,9 +29,9 @@ class Lexer:
     # Reserved keywords
     RESERVED_KEYWORDS = {
         'if': TokenType.IF,
-        'elseif': TokenType.ELSEIF,
+        'else_if': TokenType.ELSE_IF,
         'else': TokenType.ELSE,
-        'endif': TokenType.ENDIF,
+        'end_if': TokenType.END_IF,
         'and': TokenType.AND,
         'or': TokenType.OR,
         'not': TokenType.NOT,
