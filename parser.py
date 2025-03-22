@@ -10,6 +10,7 @@ class NodeType(Enum):
     EXTRACT_ATTRIBUTE = auto()
     EXTRACT_ATTRIBUTE_LIST = auto()
     SAVE_ROW = auto()
+    CLEAR_ROW = auto()
     SET_FIELD = auto()
     LOG = auto()
     HISTORY_FORWARD = auto()
@@ -138,6 +139,17 @@ class Parser:
         
         return ASTNode(
             type=NodeType.SAVE_ROW,
+            line=token.line,
+            column=token.column
+        )
+    
+    def parse_clear_row(self) -> ASTNode:
+        """Parse a clear_row statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER) # Eat 'clear_row'
+
+        return ASTNode(
+            type=NodeType.CLEAR_ROW,
             line=token.line,
             column=token.column
         )
@@ -476,6 +488,8 @@ class Parser:
                 return self.parse_extract_attribute_list()
             elif self.current_token.value == 'save_row':
                 return self.parse_save_row()
+            elif self.current_token.value == 'clear_row':
+                return self.parse_clear_row()
             elif self.current_token.value == 'set_field':
                 return self.parse_set_field()
             elif self.current_token.value == 'log':

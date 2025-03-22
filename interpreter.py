@@ -115,6 +115,11 @@ class Interpreter:
             print("Warning: Saving empty row")
             self.rows.append({})
 
+    async def execute_clear_row(self, node: ASTNode, page: Page) -> None:
+        """Execute a clear_row statement."""
+        self.current_row = {}
+        print("Cleared current row")
+
     async def evaluate_condition_exists(self, node: ASTNode, page: Page) -> bool:
         """Evaluate an exists condition with multiple selector options."""
         selectors: List[str] = cast(List[str], node.selectors)  # We know selectors is not None for CONDITION_EXISTS nodes
@@ -270,6 +275,8 @@ class Interpreter:
             await self.execute_extract_attribute_list(node, page)
         elif node.type == NodeType.SAVE_ROW:
             await self.execute_save_row(node, page)
+        elif node.type == NodeType.CLEAR_ROW:
+            await self.execute_clear_row(node, page)
         elif node.type == NodeType.SET_FIELD:
             await self.execute_set_field(node, page)
         elif node.type == NodeType.IF:
