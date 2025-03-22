@@ -6,13 +6,17 @@ from lexer import TokenType, Token
 class NodeType(Enum):
     GOTO_URL = auto()
     EXTRACT = auto()
+    EXTRACT_LIST = auto()
     EXTRACT_ATTRIBUTE = auto()
+    EXTRACT_ATTRIBUTE_LIST = auto()
     SAVE_ROW = auto()
     SET_FIELD = auto()
     LOG = auto()
     HISTORY_FORWARD = auto()
     HISTORY_BACK = auto()
     CLICK = auto()
+    THROW = auto()
+    TIMESTAMP = auto()
     EXIT = auto()
     PROGRAM = auto() 
     IF = auto()      
@@ -34,7 +38,7 @@ class ASTNode:
     url: Optional[str] = None  # For GOTO_URL
     column_name: Optional[str] = None  # For EXTRACT and SET_FIELD
     value: Optional[str] = None  # For SET_FIELD
-    log_message: Optional[str] = None  # For LOG
+    message: Optional[str] = None  # For LOG and THROW
     attribute: Optional[str] = None  # For EXTRACT_ATTRIBUTE
     selector: Optional[str] = None  # For single selector nodes
     selectors: Optional[List[str]] = None  # For nodes that support multiple selectors
@@ -344,13 +348,28 @@ class Parser:
             type=NodeType.LOG,
             line=token.line,
             column=token.column,
-            log_message=message_token.value
+            message=message_token.value
+        )
+    
+    def parse_throw(self) -> ASTNode:
+        """Parse a throw statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER) # Eat 'throw'
+
+        # We expect a string argument (error message)
+        message_token: Token = self.eat(TokenType.STRING)
+
+        return ASTNode(
+            type=NodeType.THROW,
+            line=token.line,
+            column=token.column,
+            message=message_token.value
         )
     
     def parse_history_forward(self) -> ASTNode:
         """Parse a history_forward statement."""
         token: Token = self.current_token
-        self.eat(TokenType.IDENTIFIER)
+        self.eat(TokenType.IDENTIFIER) # Eat 'history_forward'
 
         return ASTNode(
             type=NodeType.HISTORY_FORWARD,
@@ -361,7 +380,7 @@ class Parser:
     def parse_history_back(self) -> ASTNode:
         """Parse a history_back statement."""
         token: Token = self.current_token
-        self.eat(TokenType.IDENTIFIER)
+        self.eat(TokenType.IDENTIFIER) # Eat 'history_back'
 
         return ASTNode(
             type=NodeType.HISTORY_BACK,
@@ -372,7 +391,7 @@ class Parser:
     def parse_click(self) -> ASTNode:
         """Parse a click statement."""
         token: Token = self.current_token
-        self.eat(TokenType.IDENTIFIER)
+        self.eat(TokenType.IDENTIFIER) # Eat 'click'
 
         # Parse the selector list
         selectors: List[str] = self.parse_selector_list()
@@ -381,6 +400,61 @@ class Parser:
             type=NodeType.CLICK,
             line=token.line,
             column=token.column,
+            selectors=selectors
+        )
+    
+    def parse_timestamp(self) -> ASTNode:
+        """Parse a timestamp statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER) # Eat 'timestamp'
+
+        # We expect a string argument (column name)
+        column_name_token: Token = self.eat(TokenType.STRING)
+
+        return ASTNode(
+            type=NodeType.TIMESTAMP,
+            line=token.line,
+            column=token.column,
+            column_name=column_name_token.value
+        )
+    
+    def parse_extract_list(self) -> ASTNode:
+        """Parse an extract_list statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER)
+
+        # We expect a string argument (column name)
+        column_name_token: Token = self.eat(TokenType.STRING)
+
+        # Parse the selector list
+        selectors: List[str] = self.parse_selector_list()
+
+        return ASTNode(
+            type=NodeType.EXTRACT_LIST,
+            line=token.line,
+            column=token.column,
+            column_name=column_name_token.value,
+            selectors=selectors
+        )
+    
+    def parse_extract_attribute_list(self) -> ASTNode:
+        """Parse an extract_attribute_list statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER)
+
+        # We expect two string arguments (column name, attribute)
+        column_name_token: Token = self.eat(TokenType.STRING)
+        attribute_token: Token = self.eat(TokenType.STRING)
+
+        # Parse the selector list
+        selectors: List[str] = self.parse_selector_list()
+
+        return ASTNode(
+            type=NodeType.EXTRACT_ATTRIBUTE_LIST,
+            line=token.line,
+            column=token.column,
+            column_name=column_name_token.value,
+            attribute=attribute_token.value,
             selectors=selectors
         )
     
@@ -394,20 +468,28 @@ class Parser:
                 return self.parse_goto_url()
             elif self.current_token.value == 'extract':
                 return self.parse_extract()
+            elif self.current_token.value == 'extract_list':
+                return self.parse_extract_list()
             elif self.current_token.value == 'extract_attribute':
                 return self.parse_extract_attribute()
+            elif self.current_token.value == 'extract_attribute_list':
+                return self.parse_extract_attribute_list()
             elif self.current_token.value == 'save_row':
                 return self.parse_save_row()
             elif self.current_token.value == 'set_field':
                 return self.parse_set_field()
             elif self.current_token.value == 'log':
                 return self.parse_log()
+            elif self.current_token.value == 'throw':
+                return self.parse_throw()
             elif self.current_token.value == 'history_forward':
                 return self.parse_history_forward()
             elif self.current_token.value == 'history_back':
                 return self.parse_history_back()
             elif self.current_token.value == 'click':
                 return self.parse_click()
+            elif self.current_token.value == 'timestamp':
+                return self.parse_timestamp()
             elif self.current_token.value == 'exit':
                 return self.parse_exit()
             else:

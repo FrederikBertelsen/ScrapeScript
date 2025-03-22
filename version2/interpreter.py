@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from typing import List, Dict, Any, Tuple, Optional, cast
 from playwright.async_api import async_playwright, Page, ElementHandle, Playwright
 from parser import NodeType, ASTNode
@@ -16,13 +17,13 @@ class Interpreter:
         await page.wait_for_load_state("networkidle")
         print(f"Navigated to: {url}")
 
-    async def try_selectors(self, selectors: List[str], page: Page) -> Tuple[Optional[ElementHandle], Optional[str]]:
-        """Try multiple selectors until one works, returning the first successful element or None."""
+    async def try_selectors(self, selectors: List[str], page: Page) -> Tuple[Optional[List[ElementHandle]], Optional[str]]:
+        """Try multiple selectors until one works, returning a list of elements and the selector used or None."""
         for selector in selectors:
             try:
-                element = await page.query_selector(selector)
-                if element:
-                    return element, selector
+                elements = await page.query_selector_all(selector)
+                if elements and len(elements) > 0:
+                    return elements, selector
             except Exception as e:
                 print(f"Error with selector '{selector}': {e}")
         return None, None
@@ -32,13 +33,33 @@ class Interpreter:
         column_name: str = cast(str, node.column_name)  # We know column_name is not None for EXTRACT nodes
         selectors: List[str] = cast(List[str], node.selectors)  # We know selectors is not None for EXTRACT nodes
         
-        element, used_selector = await self.try_selectors(selectors, page)
+        elements, used_selector = await self.try_selectors(selectors, page)
         
-        if element:
+        if elements:
+            element = elements[0]
             try:
                 text: Optional[str] = await element.inner_text()
                 self.current_row[column_name] = text
                 print(f"Extracted '{column_name}' using selector '{used_selector}': {text}")
+            except Exception as e:
+                print(f"Error extracting text from '{used_selector}': {e}")
+                self.current_row[column_name] = None
+        else:
+            print(f"Warning: None of the selectors for '{column_name}' were found")
+            self.current_row[column_name] = None
+
+    async def execute_extract_list(self, node: ASTNode, page: Page) -> None:
+        """Execute an extract_list statement with multiple selector options."""
+        column_name: str = cast(str, node.column_name)  # We know column_name is not None for EXTRACT nodes
+        selectors: List[str] = cast(List[str], node.selectors)  # We know selectors is not None for EXTRACT nodes
+        
+        elements, used_selector = await self.try_selectors(selectors, page)
+        
+        if elements:
+            try:
+                texts: List[str] = [await element.inner_text() for element in elements]
+                self.current_row[column_name] = texts
+                print(f"Extracted '{column_name}' list using selector '{used_selector}': {texts}")
             except Exception as e:
                 print(f"Error extracting text from '{used_selector}': {e}")
                 self.current_row[column_name] = None
@@ -52,9 +73,10 @@ class Interpreter:
         selectors: List[str] = cast(List[str], node.selectors)  # We know selectors is not None for EXTRACT_ATTRIBUTE nodes
         attribute: str = cast(str, node.attribute)  # We know attribute is not None for EXTRACT_ATTRIBUTE nodes
         
-        element, used_selector = await self.try_selectors(selectors, page)
+        elements, used_selector = await self.try_selectors(selectors, page)
         
-        if element:
+        if elements:
+            element = elements[0]
             try:
                 attribute_text: Optional[str] = await element.get_attribute(attribute)
                 self.current_row[column_name] = attribute_text
@@ -65,6 +87,23 @@ class Interpreter:
         else:
             print(f"Warning: None of the selectors for '{column_name}' were found")
             self.current_row[column_name] = None
+
+    async def execute_extract_attribute_list(self, node: ASTNode, page: Page) -> None:
+        """Execute an extract_attribute_list statement with multiple selector options."""
+        column_name: str = cast(str, node.column_name)
+        selectors: List[str] = cast(List[str], node.selectors)
+        attribute: str = cast(str, node.attribute)
+
+        elements, used_selector = await self.try_selectors(selectors, page)
+
+        if elements:
+            try:
+                attribute_texts: List[str] = [await element.get_attribute(attribute) for element in elements]
+                self.current_row[column_name] = attribute_texts
+                print(f"Extracted '{column_name}' list using selector '{used_selector}' with attribute '{attribute}': {attribute_texts}")
+            except Exception as e:
+                print(f"Error extracting attribute '{attribute}' from '{used_selector}': {e}")
+                self.current_row[column_name] = None
 
     async def execute_save_row(self, node: ASTNode, page: Page) -> None:
         """Execute a save_row statement."""
@@ -79,7 +118,9 @@ class Interpreter:
     async def evaluate_condition_exists(self, node: ASTNode, page: Page) -> bool:
         """Evaluate an exists condition with multiple selector options."""
         selectors: List[str] = cast(List[str], node.selectors)  # We know selectors is not None for CONDITION_EXISTS nodes
-        element, used_selector = await self.try_selectors(selectors, page)
+        elements, used_selector = await self.try_selectors(selectors, page)
+        element = elements[0] if elements else None 
+        
         exists: bool = element is not None
         
         if exists:
@@ -175,8 +216,21 @@ class Interpreter:
 
     async def execute_log(self, node: ASTNode, page: Page) -> None:
         """Execute a log statement."""
-        message: str = cast(str, node.log_message)
+        message: str = cast(str, node.message)
         print(f"Log: {message}")
+
+    async def execute_timestamp(self, node: ASTNode, page: Page) -> None:
+        """Execute a timestamp statement."""
+        column_name: str = cast(str, node.column_name)
+        timestamp = datetime.now().isoformat()
+
+        self.current_row[column_name] = timestamp
+        print(f"Set field '{column_name}' to timestamp: {timestamp}")
+
+    async def execute_throw(self, node: ASTNode, page: Page) -> None:
+        """Execute a throw statement."""
+        message: str = cast(str, node.message)
+        print(f"Error: {message}")
 
     async def execute_history_forward(self, node: ASTNode, page: Page) -> None:
         """Execute a history_forward statement."""
@@ -191,9 +245,10 @@ class Interpreter:
     async def execute_click(self, node: ASTNode, page: Page) -> None:
         """Execute a click statement with multiple selector options."""
         selectors: List[str] = cast(List[str], node.selectors)
-        element, used_selector = await self.try_selectors(selectors, page)
+        elements, used_selector = await self.try_selectors(selectors, page)
 
-        if element:
+        if elements:
+            element = elements[0]
             try:
                 await element.click()
                 await page.wait_for_load_state("networkidle")
@@ -207,8 +262,12 @@ class Interpreter:
             await self.execute_goto_url(node, page)
         elif node.type == NodeType.EXTRACT:
             await self.execute_extract(node, page)
+        elif node.type == NodeType.EXTRACT_LIST:
+            await self.execute_extract_list(node, page)
         elif node.type == NodeType.EXTRACT_ATTRIBUTE:
             await self.execute_extract_attribute(node, page)
+        elif node.type == NodeType.EXTRACT_ATTRIBUTE_LIST:
+            await self.execute_extract_attribute_list(node, page)
         elif node.type == NodeType.SAVE_ROW:
             await self.execute_save_row(node, page)
         elif node.type == NodeType.SET_FIELD:
@@ -217,6 +276,11 @@ class Interpreter:
             return await self.execute_if(node, page)
         elif node.type == NodeType.LOG:
             await self.execute_log(node, page)
+        elif node.type == NodeType.TIMESTAMP:
+            await self.execute_timestamp(node, page)
+        elif node.type == NodeType.THROW:
+            await self.execute_throw(node, page)
+            return False  # Stop execution after throwing an error
         elif node.type == NodeType.HISTORY_FORWARD:
             await self.execute_history_forward(node, page)
         elif node.type == NodeType.HISTORY_BACK:
