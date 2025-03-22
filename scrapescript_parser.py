@@ -40,7 +40,7 @@ def parse_file(file_path: str) -> list[Step]:
 
         match step_type:
             case StepType.GOTO_URL:
-                match = re.match(r'"([^"]+)"', args)
+                match = re.match(r"'([^']+)'", args)
                 if not match:
                     print(f'Error parsing GOTO_URL: {line}')
                     continue
@@ -49,7 +49,7 @@ def parse_file(file_path: str) -> list[Step]:
                 step_list.append(goto_url_step)
                 
             case StepType.IF_EXISTS:
-                match = re.match(r'"([^"]+)" +\? +(\d+) +: +(\d+)', args)
+                match = re.match(r"'([^']+)' +\? +(\d+) +: +(\d+)", args)
                 if not match:
                     print(f'Error parsing IF_EXISTS: {line}')
                     continue
@@ -60,7 +60,7 @@ def parse_file(file_path: str) -> list[Step]:
                 step_list.append(if_exists_step)
                 
             case StepType.EXTRACT:
-                match = re.match(r'"([^"]+)" +"([^"]+)"', args)
+                match = re.match(r"'([^']+)' +'([^']+)'", args)
                 if not match:
                     print(f'Error parsing EXTRACT: {line}')
                     continue
@@ -70,7 +70,7 @@ def parse_file(file_path: str) -> list[Step]:
                 step_list.append(extract_step)
                 
             case StepType.CLICK:
-                match = re.match(r'"([^"]+)"', args)
+                match = re.match(r"'([^']+)'", args)
                 if not match:
                     print(f'Error parsing CLICK: {line}')
                     continue
@@ -93,7 +93,7 @@ def parse_file(file_path: str) -> list[Step]:
                 step_list.append(goto_line_step)
                 
             case StepType.LOG:
-                match = re.match(r'"([^"]+)"', args)
+                match = re.match(r"'([^']+)'", args)
                 if not match:
                     print(f'Error parsing LOG: {line}')
                     continue
