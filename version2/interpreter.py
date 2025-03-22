@@ -13,6 +13,7 @@ class Interpreter:
         """Execute a goto_url statement."""
         url: str = cast(str, node.url)  # We know url is not None for GOTO_URL nodes
         await page.goto(url)
+        await page.wait_for_load_state("networkidle")
         print(f"Navigated to: {url}")
 
     async def try_selectors(self, selectors: List[str], page: Page) -> Tuple[Optional[ElementHandle], Optional[str]]:
@@ -172,6 +173,34 @@ class Interpreter:
         self.current_row[column_name] = value
         print(f"Set field '{column_name}' to: {value}")
 
+    async def execute_log(self, node: ASTNode, page: Page) -> None:
+        """Execute a log statement."""
+        message: str = cast(str, node.log_message)
+        print(f"Log: {message}")
+
+    async def execute_history_forward(self, node: ASTNode, page: Page) -> None:
+        """Execute a history_forward statement."""
+        await page.go_forward()
+        print("Navigated forward in history")
+
+    async def execute_history_back(self, node: ASTNode, page: Page) -> None:
+        """Execute a history_back statement."""
+        await page.go_back()
+        print("Navigated back in history")
+
+    async def execute_click(self, node: ASTNode, page: Page) -> None:
+        """Execute a click statement with multiple selector options."""
+        selectors: List[str] = cast(List[str], node.selectors)
+        element, used_selector = await self.try_selectors(selectors, page)
+
+        if element:
+            try:
+                await element.click()
+                await page.wait_for_load_state("networkidle")
+                print(f"Clicked element using selector: '{used_selector}'")
+            except Exception as e:
+                print(f"Error clicking element using selector '{used_selector}': {e}")
+
     async def execute_node(self, node: ASTNode, page: Page) -> bool:
         """Execute a single AST node."""
         if node.type == NodeType.GOTO_URL:
@@ -186,6 +215,14 @@ class Interpreter:
             await self.execute_set_field(node, page)
         elif node.type == NodeType.IF:
             return await self.execute_if(node, page)
+        elif node.type == NodeType.LOG:
+            await self.execute_log(node, page)
+        elif node.type == NodeType.HISTORY_FORWARD:
+            await self.execute_history_forward(node, page)
+        elif node.type == NodeType.HISTORY_BACK:
+            await self.execute_history_back(node, page)
+        elif node.type == NodeType.CLICK:
+            await self.execute_click(node, page)
         elif node.type == NodeType.EXIT:
             return False  # Signal to stop execution
         return True  # Continue execution

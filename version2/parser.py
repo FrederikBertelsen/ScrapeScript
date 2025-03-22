@@ -9,6 +9,10 @@ class NodeType(Enum):
     EXTRACT_ATTRIBUTE = auto()
     SAVE_ROW = auto()
     SET_FIELD = auto()
+    LOG = auto()
+    HISTORY_FORWARD = auto()
+    HISTORY_BACK = auto()
+    CLICK = auto()
     EXIT = auto()
     PROGRAM = auto() 
     IF = auto()      
@@ -30,6 +34,7 @@ class ASTNode:
     url: Optional[str] = None  # For GOTO_URL
     column_name: Optional[str] = None  # For EXTRACT and SET_FIELD
     value: Optional[str] = None  # For SET_FIELD
+    log_message: Optional[str] = None  # For LOG
     attribute: Optional[str] = None  # For EXTRACT_ATTRIBUTE
     selector: Optional[str] = None  # For single selector nodes
     selectors: Optional[List[str]] = None  # For nodes that support multiple selectors
@@ -327,6 +332,58 @@ class Parser:
             selectors=selectors
         )
     
+    def parse_log(self) -> ASTNode:
+        """Parse a log statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER) # Eat 'log'
+
+        # We expect a string argument (log message)
+        message_token: Token = self.eat(TokenType.STRING)
+
+        return ASTNode(
+            type=NodeType.LOG,
+            line=token.line,
+            column=token.column,
+            log_message=message_token.value
+        )
+    
+    def parse_history_forward(self) -> ASTNode:
+        """Parse a history_forward statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER)
+
+        return ASTNode(
+            type=NodeType.HISTORY_FORWARD,
+            line=token.line,
+            column=token.column
+        )
+    
+    def parse_history_back(self) -> ASTNode:
+        """Parse a history_back statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER)
+
+        return ASTNode(
+            type=NodeType.HISTORY_BACK,
+            line=token.line,
+            column=token.column
+        )
+    
+    def parse_click(self) -> ASTNode:
+        """Parse a click statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER)
+
+        # Parse the selector list
+        selectors: List[str] = self.parse_selector_list()
+
+        return ASTNode(
+            type=NodeType.CLICK,
+            line=token.line,
+            column=token.column,
+            selectors=selectors
+        )
+    
     def parse_statement(self) -> Optional[ASTNode]:
         """Parse a single statement."""
         if not self.current_token:
@@ -343,6 +400,14 @@ class Parser:
                 return self.parse_save_row()
             elif self.current_token.value == 'set_field':
                 return self.parse_set_field()
+            elif self.current_token.value == 'log':
+                return self.parse_log()
+            elif self.current_token.value == 'history_forward':
+                return self.parse_history_forward()
+            elif self.current_token.value == 'history_back':
+                return self.parse_history_back()
+            elif self.current_token.value == 'click':
+                return self.parse_click()
             elif self.current_token.value == 'exit':
                 return self.parse_exit()
             else:
