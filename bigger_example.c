@@ -8,5 +8,5 @@
 5 IF_EXISTS "#next-page" ? 6 : 9
     6 CLICK "#next-page"
     7 LOG "Going to next page!"
-    8 GOTO 1
+    8 GOTO_LINE 1
 9 END
