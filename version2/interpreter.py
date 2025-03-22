@@ -1,21 +1,21 @@
 import asyncio
-from typing import List, Dict, Any, Tuple, Optional
-from playwright.async_api import async_playwright
+from typing import List, Dict, Any, Tuple, Optional, cast
+from playwright.async_api import async_playwright, Page, ElementHandle, Playwright
 from parser import NodeType, ASTNode
 
 class Interpreter:
-    def __init__(self, ast):
-        self.ast = ast
-        self.current_row = {}  # Current row being built
-        self.rows = []  # All rows collected
+    def __init__(self, ast: ASTNode) -> None:
+        self.ast: ASTNode = ast
+        self.current_row: Dict[str, Any] = {}  # Current row being built
+        self.rows: List[Dict[str, Any]] = []  # All rows collected
 
-    async def execute_goto_url(self, node, page):
+    async def execute_goto_url(self, node: ASTNode, page: Page) -> None:
         """Execute a goto_url statement."""
-        url = node.url
+        url: str = cast(str, node.url)  # We know url is not None for GOTO_URL nodes
         await page.goto(url)
         print(f"Navigated to: {url}")
 
-    async def try_selectors(self, selectors, page):
+    async def try_selectors(self, selectors: List[str], page: Page) -> Tuple[Optional[ElementHandle], Optional[str]]:
         """Try multiple selectors until one works, returning the first successful element or None."""
         for selector in selectors:
             try:
@@ -26,16 +26,16 @@ class Interpreter:
                 print(f"Error with selector '{selector}': {e}")
         return None, None
 
-    async def execute_extract(self, node, page):
+    async def execute_extract(self, node: ASTNode, page: Page) -> None:
         """Execute an extract statement with multiple selector options."""
-        column_name = node.column_name
-        selectors = node.selectors
+        column_name: str = cast(str, node.column_name)  # We know column_name is not None for EXTRACT nodes
+        selectors: List[str] = cast(List[str], node.selectors)  # We know selectors is not None for EXTRACT nodes
         
         element, used_selector = await self.try_selectors(selectors, page)
         
         if element:
             try:
-                text = await element.inner_text()
+                text: Optional[str] = await element.inner_text()
                 self.current_row[column_name] = text
                 print(f"Extracted '{column_name}' using selector '{used_selector}': {text}")
             except Exception as e:
@@ -45,26 +45,27 @@ class Interpreter:
             print(f"Warning: None of the selectors for '{column_name}' were found")
             self.current_row[column_name] = None
 
-    async def execute_extract_attribute(self, node, page):
+    async def execute_extract_attribute(self, node: ASTNode, page: Page) -> None:
         """Execute an extract_attribute statement with multiple selector options."""
-        column_name = node.column_name
-        selectors = node.selectors
+        column_name: str = cast(str, node.column_name)  # We know column_name is not None for EXTRACT_ATTRIBUTE nodes
+        selectors: List[str] = cast(List[str], node.selectors)  # We know selectors is not None for EXTRACT_ATTRIBUTE nodes
+        attribute: str = cast(str, node.attribute)  # We know attribute is not None for EXTRACT_ATTRIBUTE nodes
         
         element, used_selector = await self.try_selectors(selectors, page)
         
         if element:
             try:
-                attribute_text = await element.get_attribute(node.attribute)
+                attribute_text: Optional[str] = await element.get_attribute(attribute)
                 self.current_row[column_name] = attribute_text
-                print(f"Extracted '{column_name}' using selector '{used_selector}' with attribute '{node.attribute}': {attribute_text}")
+                print(f"Extracted '{column_name}' using selector '{used_selector}' with attribute '{attribute}': {attribute_text}")
             except Exception as e:
-                print(f"Error extracting attribute '{node.attribute}' from '{used_selector}': {e}")
+                print(f"Error extracting attribute '{attribute}' from '{used_selector}': {e}")
                 self.current_row[column_name] = None
         else:
             print(f"Warning: None of the selectors for '{column_name}' were found")
             self.current_row[column_name] = None
 
-    async def execute_save_row(self, node, page):
+    async def execute_save_row(self, node: ASTNode, page: Page) -> None:
         """Execute a save_row statement."""
         if self.current_row:
             self.rows.append(self.current_row.copy())  # Save a copy of the current row
@@ -74,11 +75,11 @@ class Interpreter:
             print("Warning: Saving empty row")
             self.rows.append({})
 
-    async def evaluate_condition_exists(self, node, page):
+    async def evaluate_condition_exists(self, node: ASTNode, page: Page) -> bool:
         """Evaluate an exists condition with multiple selector options."""
-        selectors = node.selectors
+        selectors: List[str] = cast(List[str], node.selectors)  # We know selectors is not None for CONDITION_EXISTS nodes
         element, used_selector = await self.try_selectors(selectors, page)
-        exists = element is not None
+        exists: bool = element is not None
         
         if exists:
             print(f"Found element using selector: '{used_selector}'")
@@ -87,26 +88,26 @@ class Interpreter:
             
         return exists
 
-    async def evaluate_condition_and(self, node, page):
+    async def evaluate_condition_and(self, node: ASTNode, page: Page) -> bool:
         """Evaluate an AND condition."""
-        left_result = await self.evaluate_condition(node.left, page)
+        left_result: bool = await self.evaluate_condition(cast(ASTNode, node.left), page)  # We know left is not None for CONDITION_AND nodes
         if not left_result:  # Short-circuit evaluation
             return False
-        return await self.evaluate_condition(node.right, page)
+        return await self.evaluate_condition(cast(ASTNode, node.right), page)  # We know right is not None for CONDITION_AND nodes
 
-    async def evaluate_condition_or(self, node, page):
+    async def evaluate_condition_or(self, node: ASTNode, page: Page) -> bool:
         """Evaluate an OR condition."""
-        left_result = await self.evaluate_condition(node.left, page)
+        left_result: bool = await self.evaluate_condition(cast(ASTNode, node.left), page)  # We know left is not None for CONDITION_OR nodes
         if left_result:  # Short-circuit evaluation
             return True
-        return await self.evaluate_condition(node.right, page)
+        return await self.evaluate_condition(cast(ASTNode, node.right), page)  # We know right is not None for CONDITION_OR nodes
 
-    async def evaluate_condition_not(self, node, page):
+    async def evaluate_condition_not(self, node: ASTNode, page: Page) -> bool:
         """Evaluate a NOT condition."""
-        result = await self.evaluate_condition(node.operand, page)
+        result: bool = await self.evaluate_condition(cast(ASTNode, node.operand), page)  # We know operand is not None for CONDITION_NOT nodes
         return not result
 
-    async def evaluate_condition(self, node, page):
+    async def evaluate_condition(self, node: ASTNode, page: Page) -> bool:
         """Evaluate a condition and return True or False."""
         if node.type == NodeType.CONDITION_EXISTS:
             return await self.evaluate_condition_exists(node, page)
@@ -119,15 +120,16 @@ class Interpreter:
         else:
             raise ValueError(f"Unknown condition type: {node.type}")
 
-    async def execute_if(self, node, page):
+    async def execute_if(self, node: ASTNode, page: Page) -> bool:
         """Execute an if statement with optional else_if and else clauses."""
         # Check the main condition first
-        condition_result = await self.evaluate_condition(node.condition, page)
+        condition_result: bool = await self.evaluate_condition(cast(ASTNode, node.condition), page)  # We know condition is not None for IF nodes
         print(f"If condition evaluated to: {condition_result}")
         
         if condition_result:
             # Execute the true branch
-            for statement in node.true_branch:
+            true_branch: List[ASTNode] = cast(List[ASTNode], node.true_branch)  # We know true_branch is not None for IF nodes
+            for statement in true_branch:
                 continue_execution = await self.execute_node(statement, page)
                 if not continue_execution:
                     return False
@@ -135,7 +137,7 @@ class Interpreter:
             # Try each else_if branch in order
             executed_else_if = False
             for else_if_condition, else_if_statements in node.else_if_branches:
-                else_if_result = await self.evaluate_condition(else_if_condition, page)
+                else_if_result: bool = await self.evaluate_condition(else_if_condition, page)
                 print(f"Elseif condition evaluated to: {else_if_result}")
                 
                 if else_if_result:
@@ -162,16 +164,15 @@ class Interpreter:
                     
         return True  # Continue execution
 
-
-    async def execute_set_field(self, node, page):
+    async def execute_set_field(self, node: ASTNode, page: Page) -> None:
         """Execute a set_field statement."""
-        column_name = node.column_name
-        value = node.value
+        column_name: str = cast(str, node.column_name)  # We know column_name is not None for SET_FIELD nodes
+        value: str = cast(str, node.value)  # We know value is not None for SET_FIELD nodes
         
         self.current_row[column_name] = value
         print(f"Set field '{column_name}' to: {value}")
 
-    async def execute_node(self, node, page):
+    async def execute_node(self, node: ASTNode, page: Page) -> bool:
         """Execute a single AST node."""
         if node.type == NodeType.GOTO_URL:
             await self.execute_goto_url(node, page)
@@ -195,10 +196,11 @@ class Interpreter:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
             
-            for node in self.ast.children:
-                continue_execution = await self.execute_node(node, page)
-                if not continue_execution:
-                    break
+            if self.ast.children:
+                for node in self.ast.children:
+                    continue_execution = await self.execute_node(node, page)
+                    if not continue_execution:
+                        break
                     
             await browser.close()
             

@@ -1,15 +1,16 @@
 import asyncio
 import argparse
 import json
+from typing import Dict, List, Any
 from lexer import Lexer
 from parser import Parser
 from interpreter import Interpreter
 
-async def run_script(script_path):
+async def run_script(script_path: str) -> List[Dict[str, Any]]:
     """Run a ScrapeScript from a file."""
     # Read the script file
     with open(script_path, 'r') as f:
-        script_text = f.read()
+        script_text: str = f.read()
     
     # Tokenize the script
     lexer = Lexer(script_text)
@@ -25,7 +26,7 @@ async def run_script(script_path):
     
     return results
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description='ScrapeScript: A DSL for web scraping')
     parser.add_argument('script', help='Path to the ScrapeScript file')
     parser.add_argument('-o', '--output', help='Output file path (JSON format)')
@@ -33,7 +34,7 @@ def main():
     args = parser.parse_args()
     
     # Run the script
-    results = asyncio.run(run_script(args.script))
+    results: List[Dict[str, Any]] = asyncio.run(run_script(args.script))
     
     # Print the results to stdout
     print(json.dumps(results, indent=2))

@@ -1,6 +1,7 @@
 import re
 from enum import Enum, auto
 from dataclasses import dataclass
+from typing import List, Optional, Union
 
 class TokenType(Enum):
     IDENTIFIER = auto()      # goto_url, extract, exists, etc.
@@ -27,7 +28,7 @@ class Token:
 
 class Lexer:
     # Reserved keywords
-    RESERVED_KEYWORDS = {
+    RESERVED_KEYWORDS: dict[str, TokenType] = {
         'if': TokenType.IF,
         'else_if': TokenType.ELSE_IF,
         'else': TokenType.ELSE,
@@ -37,14 +38,14 @@ class Lexer:
         'not': TokenType.NOT,
     }
 
-    def __init__(self, text):
-        self.text = text
-        self.pos = 0
-        self.line = 1
-        self.column = 1
-        self.current_char = self.text[0] if text else None
+    def __init__(self, text: str) -> None:
+        self.text: str = text
+        self.pos: int = 0
+        self.line: int = 1
+        self.column: int = 1
+        self.current_char: Optional[str] = self.text[0] if text else None
 
-    def advance(self):
+    def advance(self) -> None:
         """Move to the next character in the input."""
         self.pos += 1
         self.column += 1
@@ -57,12 +58,12 @@ class Lexer:
                 self.column = 1
             self.current_char = self.text[self.pos]
 
-    def skip_whitespace(self):
+    def skip_whitespace(self) -> None:
         """Skip whitespace characters but not newlines."""
         while self.current_char and self.current_char.isspace() and self.current_char != '\n':
             self.advance()
 
-    def skip_comment(self):
+    def skip_comment(self) -> None:
         """Skip comment (from # to end of line)."""
         # Skip the # character
         self.advance()
@@ -71,10 +72,10 @@ class Lexer:
         while self.current_char and self.current_char != '\n':
             self.advance()
 
-    def identifier(self):
+    def identifier(self) -> Token:
         """Read an identifier (command name or keyword)."""
-        result = ''
-        start_column = self.column
+        result: str = ''
+        start_column: int = self.column
         
         while self.current_char and (self.current_char.isalnum() or self.current_char == '_'):
             result += self.current_char
@@ -84,13 +85,13 @@ class Lexer:
         token_type = self.RESERVED_KEYWORDS.get(result.lower(), TokenType.IDENTIFIER)
         return Token(token_type, result, self.line, start_column)
 
-    def string(self):
+    def string(self) -> Token:
         """Read a string literal."""
-        quote_char = self.current_char  # Store whether ' or " was used
-        start_column = self.column
+        quote_char: str = self.current_char  # Store whether ' or " was used
+        start_column: int = self.column
         self.advance()  # Skip the opening quote
         
-        result = ''
+        result: str = ''
         while self.current_char and self.current_char != quote_char:
             # Handle escape sequences
             if self.current_char == '\\' and self.pos + 1 < len(self.text):
@@ -115,7 +116,7 @@ class Lexer:
         self.advance()  # Skip the closing quote
         return Token(TokenType.STRING, result, self.line, start_column)
 
-    def get_next_token(self):
+    def get_next_token(self) -> Token:
         """Get the next token from the input."""
         while self.current_char:
             # Skip whitespace
@@ -165,10 +166,10 @@ class Lexer:
         # If we get here, we're at the end of the file
         return Token(TokenType.EOF, '', self.line, self.column)
 
-    def tokenize(self):
+    def tokenize(self) -> List[Token]:
         """Convert the entire input to a list of tokens."""
-        tokens = []
-        token = self.get_next_token()
+        tokens: List[Token] = []
+        token: Token = self.get_next_token()
         
         while token.type != TokenType.EOF:
             tokens.append(token)

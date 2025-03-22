@@ -1,6 +1,6 @@
 from enum import Enum, auto
 from dataclasses import dataclass
-from typing import List, Optional, Any, Dict, Union, Tuple
+from typing import List, Optional, Any, Dict, Union, Tuple, TypeVar, cast
 from lexer import TokenType, Token
 
 class NodeType(Enum):
@@ -17,6 +17,9 @@ class NodeType(Enum):
     CONDITION_OR = auto()      
     CONDITION_NOT = auto()     
 
+# Type alias to facilitate self-referencing ASTNode
+ASTNodeT = TypeVar('ASTNodeT', bound='ASTNode')
+
 @dataclass
 class ASTNode:
     type: NodeType
@@ -30,22 +33,22 @@ class ASTNode:
     attribute: Optional[str] = None  # For EXTRACT_ATTRIBUTE
     selector: Optional[str] = None  # For single selector nodes
     selectors: Optional[List[str]] = None  # For nodes that support multiple selectors
-    condition: Optional[Any] = None  # For IF nodes
-    true_branch: Optional[List[Any]] = None  # For IF nodes
-    else_if_branches: Optional[List[Tuple[Any, List[Any]]]] = None  # For IF nodes with else_if
-    false_branch: Optional[List[Any]] = None  # For IF nodes
-    left: Optional[Any] = None  # For logical operations
-    right: Optional[Any] = None  # For logical operations
-    operand: Optional[Any] = None  # For NOT
-    children: Optional[List[Any]] = None  # For PROGRAM
+    condition: Optional[ASTNodeT] = None  # For IF nodes
+    true_branch: Optional[List[ASTNodeT]] = None  # For IF nodes
+    else_if_branches: Optional[List[Tuple[ASTNodeT, List[ASTNodeT]]]] = None  # For IF nodes with else_if
+    false_branch: Optional[List[ASTNodeT]] = None  # For IF nodes
+    left: Optional[ASTNodeT] = None  # For logical operations
+    right: Optional[ASTNodeT] = None  # For logical operations
+    operand: Optional[ASTNodeT] = None  # For NOT
+    children: Optional[List[ASTNodeT]] = None  # For PROGRAM
 
 class Parser:
-    def __init__(self, tokens):
-        self.tokens = tokens
-        self.pos = 0
-        self.current_token = self.tokens[0] if tokens else None
+    def __init__(self, tokens: List[Token]) -> None:
+        self.tokens: List[Token] = tokens
+        self.pos: int = 0
+        self.current_token: Optional[Token] = self.tokens[0] if tokens else None
 
-    def advance(self):
+    def advance(self) -> None:
         """Move to the next token."""
         self.pos += 1
         if self.pos < len(self.tokens):
@@ -53,10 +56,10 @@ class Parser:
         else:
             self.current_token = None
 
-    def eat(self, token_type):
+    def eat(self, token_type: TokenType) -> Token:
         """Consume the current token if it matches the expected type."""
         if self.current_token and self.current_token.type == token_type:
-            token = self.current_token
+            token: Token = self.current_token
             self.advance()
             return token
         else:
@@ -64,17 +67,17 @@ class Parser:
             found = self.current_token.type.name if self.current_token else "EOF"
             raise SyntaxError(f"Expected {expected}, found {found} at line {self.current_token.line}, column {self.current_token.column}")
 
-    def skip_newlines(self):
+    def skip_newlines(self) -> None:
         """Skip any newline tokens."""
         while self.current_token and self.current_token.type == TokenType.NEWLINE:
             self.advance()
 
-    def parse_selector_list(self):
+    def parse_selector_list(self) -> List[str]:
         """Parse a list of selectors (string literals separated by commas)."""
-        selectors = []
+        selectors: List[str] = []
         
         # Parse the first selector (required)
-        selector_token = self.eat(TokenType.STRING)
+        selector_token: Token = self.eat(TokenType.STRING)
         selectors.append(selector_token.value)
         
         # Parse additional selectors (optional)
@@ -85,13 +88,13 @@ class Parser:
             
         return selectors
 
-    def parse_goto_url(self):
+    def parse_goto_url(self) -> ASTNode:
         """Parse a goto_url statement."""
-        token = self.current_token
+        token: Token = self.current_token
         self.eat(TokenType.IDENTIFIER)  # Eat 'goto_url'
         
         # We expect a string argument (the URL)
-        url_token = self.eat(TokenType.STRING)
+        url_token: Token = self.eat(TokenType.STRING)
         
         return ASTNode(
             type=NodeType.GOTO_URL,
@@ -100,16 +103,16 @@ class Parser:
             url=url_token.value
         )
 
-    def parse_extract(self):
+    def parse_extract(self) -> ASTNode:
         """Parse an extract statement."""
-        token = self.current_token
+        token: Token = self.current_token
         self.eat(TokenType.IDENTIFIER)  # Eat 'extract'
         
         # We expect a string argument (column name)
-        column_name_token = self.eat(TokenType.STRING)
+        column_name_token: Token = self.eat(TokenType.STRING)
         
         # Parse the selector list
-        selectors = self.parse_selector_list()
+        selectors: List[str] = self.parse_selector_list()
         
         return ASTNode(
             type=NodeType.EXTRACT,
@@ -119,9 +122,9 @@ class Parser:
             selectors=selectors
         )
 
-    def parse_save_row(self):
+    def parse_save_row(self) -> ASTNode:
         """Parse a save_row statement."""
-        token = self.current_token
+        token: Token = self.current_token
         self.eat(TokenType.IDENTIFIER)  # Eat 'save_row'
         
         return ASTNode(
@@ -130,9 +133,9 @@ class Parser:
             column=token.column
         )
 
-    def parse_exit(self):
+    def parse_exit(self) -> ASTNode:
         """Parse an exit statement."""
-        token = self.current_token
+        token: Token = self.current_token
         self.eat(TokenType.IDENTIFIER)  # Eat 'exit'
         
         return ASTNode(
@@ -141,13 +144,13 @@ class Parser:
             column=token.column
         )
         
-    def parse_exists_condition(self):
+    def parse_exists_condition(self) -> ASTNode:
         """Parse an 'exists' condition."""
-        token = self.current_token
+        token: Token = self.current_token
         self.eat(TokenType.IDENTIFIER)  # Eat 'exists'
         
         # Parse the selector list
-        selectors = self.parse_selector_list()
+        selectors: List[str] = self.parse_selector_list()
         
         return ASTNode(
             type=NodeType.CONDITION_EXISTS,
@@ -156,15 +159,15 @@ class Parser:
             selectors=selectors
         )
         
-    def parse_condition_factor(self):
+    def parse_condition_factor(self) -> ASTNode:
         """Parse a condition factor (primary condition)."""
         if self.current_token.type == TokenType.LPAREN:
             self.eat(TokenType.LPAREN)
-            node = self.parse_condition()
+            node: ASTNode = self.parse_condition()
             self.eat(TokenType.RPAREN)
             return node
         elif self.current_token.type == TokenType.NOT:
-            token = self.current_token
+            token: Token = self.current_token
             self.eat(TokenType.NOT)
             return ASTNode(
                 type=NodeType.CONDITION_NOT,
@@ -177,12 +180,12 @@ class Parser:
         else:
             raise SyntaxError(f"Expected condition at line {self.current_token.line}, column {self.current_token.column}")
     
-    def parse_condition_term(self):
+    def parse_condition_term(self) -> ASTNode:
         """Parse a condition term (AND expressions)."""
-        node = self.parse_condition_factor()
+        node: ASTNode = self.parse_condition_factor()
         
         while (self.current_token and self.current_token.type == TokenType.AND):
-            token = self.current_token
+            token: Token = self.current_token
             self.eat(TokenType.AND)
             
             node = ASTNode(
@@ -195,12 +198,12 @@ class Parser:
             
         return node
     
-    def parse_condition(self):
+    def parse_condition(self) -> ASTNode:
         """Parse a condition (OR expressions)."""
-        node = self.parse_condition_term()
+        node: ASTNode = self.parse_condition_term()
         
         while (self.current_token and self.current_token.type == TokenType.OR):
-            token = self.current_token
+            token: Token = self.current_token
             self.eat(TokenType.OR)
             
             node = ASTNode(
@@ -213,13 +216,13 @@ class Parser:
             
         return node
 
-    def parse_if_statement(self):
+    def parse_if_statement(self) -> ASTNode:
         """Parse an if statement with optional else_if and else clauses."""
-        token = self.current_token
+        token: Token = self.current_token
         self.eat(TokenType.IF)
         
         # Parse the condition
-        condition = self.parse_condition()
+        condition: ASTNode = self.parse_condition()
         
         # We expect at least one newline after the condition
         if self.current_token.type != TokenType.NEWLINE:
@@ -227,7 +230,7 @@ class Parser:
         self.skip_newlines()  # Skip all consecutive newlines
         
         # Parse the true branch (statements to execute if condition is true)
-        true_branch = []
+        true_branch: List[ASTNode] = []
         while (self.current_token and 
                self.current_token.type not in 
                (TokenType.END_IF, TokenType.ELSE, TokenType.ELSE_IF)):
@@ -237,12 +240,12 @@ class Parser:
             self.skip_newlines()
         
         # Parse any else_if branches
-        else_if_branches = []
+        else_if_branches: List[Tuple[ASTNode, List[ASTNode]]] = []
         while self.current_token and self.current_token.type == TokenType.ELSE_IF:
             self.eat(TokenType.ELSE_IF)
             
             # Parse the else_if condition
-            else_if_condition = self.parse_condition()
+            else_if_condition: ASTNode = self.parse_condition()
             
             # We expect at least one newline after the condition
             if self.current_token.type != TokenType.NEWLINE:
@@ -250,7 +253,7 @@ class Parser:
             self.skip_newlines()  # Skip all consecutive newlines
             
             # Parse the else_if branch statements
-            else_if_statements = []
+            else_if_statements: List[ASTNode] = []
             while (self.current_token and 
                    self.current_token.type not in 
                    (TokenType.END_IF, TokenType.ELSE, TokenType.ELSE_IF)):
@@ -262,7 +265,7 @@ class Parser:
             else_if_branches.append((else_if_condition, else_if_statements))
         
         # Parse the else branch if it exists
-        false_branch = []
+        false_branch: List[ASTNode] = []
         if self.current_token and self.current_token.type == TokenType.ELSE:
             self.eat(TokenType.ELSE)
             self.skip_newlines()  # Skip newlines after else
@@ -286,14 +289,14 @@ class Parser:
             false_branch=false_branch if false_branch else None
         )
 
-    def parse_set_field(self):
+    def parse_set_field(self) -> ASTNode:
         """Parse a set_field statement."""
-        token = self.current_token
+        token: Token = self.current_token
         self.eat(TokenType.IDENTIFIER)  # Eat 'set_field'
         
         # We expect two string arguments (column name and value)
-        column_name_token = self.eat(TokenType.STRING)
-        value_token = self.eat(TokenType.STRING)
+        column_name_token: Token = self.eat(TokenType.STRING)
+        value_token: Token = self.eat(TokenType.STRING)
         
         return ASTNode(
             type=NodeType.SET_FIELD,
@@ -303,17 +306,17 @@ class Parser:
             value=value_token.value
         )
 
-    def parse_extract_attribute(self):
+    def parse_extract_attribute(self) -> ASTNode:
         """Parse an extract_attribute statement."""
-        token = self.current_token
+        token: Token = self.current_token
         self.eat(TokenType.IDENTIFIER)  # Eat 'extract_attribute'
         
         # We expect two string arguments (column name, attribute)
-        column_name_token = self.eat(TokenType.STRING)
-        attribute_token = self.eat(TokenType.STRING)
+        column_name_token: Token = self.eat(TokenType.STRING)
+        attribute_token: Token = self.eat(TokenType.STRING)
         
         # Parse the selector list
-        selectors = self.parse_selector_list()
+        selectors: List[str] = self.parse_selector_list()
         
         return ASTNode(
             type=NodeType.EXTRACT_ATTRIBUTE,
@@ -324,7 +327,7 @@ class Parser:
             selectors=selectors
         )
     
-    def parse_statement(self):
+    def parse_statement(self) -> Optional[ASTNode]:
         """Parse a single statement."""
         if not self.current_token:
             return None
@@ -357,9 +360,9 @@ class Parser:
         # If we get here, we have an unexpected token
         raise SyntaxError(f"Unexpected token {self.current_token.type.name} at line {self.current_token.line}")
 
-    def parse(self):
+    def parse(self) -> ASTNode:
         """Parse the entire program."""
-        statements = []
+        statements: List[ASTNode] = []
         
         # Skip any leading newlines
         self.skip_newlines()
