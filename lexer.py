@@ -18,6 +18,13 @@ class TokenType(Enum):
     RPAREN = auto()          # )
     COMMA = auto()           # ,
     EOF = auto()             # End of file
+    FOREACH = auto()         # foreach keyword
+    END_FOREACH = auto()     # end_foreach keyword
+    AS = auto()              # as keyword
+    FROM = auto()            # from keyword
+    WHILE = auto()           # while keyword
+    END_WHILE = auto()       # end_while keyword
+    SELECT = auto()          # select keyword
 
 @dataclass
 class Token:
@@ -36,6 +43,13 @@ class Lexer:
         'and': TokenType.AND,
         'or': TokenType.OR,
         'not': TokenType.NOT,
+        'foreach': TokenType.FOREACH,
+        'end_foreach': TokenType.END_FOREACH,
+        'as': TokenType.AS,
+        'from': TokenType.FROM,
+        'while': TokenType.WHILE,
+        'end_while': TokenType.END_WHILE,
+        'select': TokenType.SELECT,
     }
 
     def __init__(self, text: str) -> None:
@@ -77,13 +91,22 @@ class Lexer:
         result: str = ''
         start_column: int = self.column
         
+        # Support @ in variable names (for element references)
+        if self.current_char == '@':
+            result += self.current_char
+            self.advance()
+        
         while self.current_char and (self.current_char.isalnum() or self.current_char == '_'):
             result += self.current_char
             self.advance()
             
         # Check if this is a reserved keyword
-        token_type = self.RESERVED_KEYWORDS.get(result.lower(), TokenType.IDENTIFIER)
-        return Token(token_type, result, self.line, start_column)
+        if result.startswith('@'):
+            # Element references are always identifiers
+            return Token(TokenType.IDENTIFIER, result, self.line, start_column)
+        else:
+            token_type = self.RESERVED_KEYWORDS.get(result.lower(), TokenType.IDENTIFIER)
+            return Token(token_type, result, self.line, start_column)
 
     def string(self) -> Token:
         """Read a string literal."""
@@ -135,8 +158,8 @@ class Lexer:
                 self.advance()
                 return token
                 
-            # Handle identifiers
-            if self.current_char.isalpha() or self.current_char == '_':
+            # Handle identifiers (including those starting with @)
+            if self.current_char.isalpha() or self.current_char == '_' or self.current_char == '@':
                 return self.identifier()
                 
             # Handle string literals

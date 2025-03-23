@@ -24,7 +24,10 @@ class NodeType(Enum):
     CONDITION_EXISTS = auto()
     CONDITION_AND = auto()    
     CONDITION_OR = auto()      
-    CONDITION_NOT = auto()     
+    CONDITION_NOT = auto()  
+    FOREACH = auto()
+    WHILE = auto()           # New while loop node type
+    SELECT = auto()          # New select node type   
 
 # Type alias to facilitate self-referencing ASTNode
 ASTNodeT = TypeVar('ASTNodeT', bound='ASTNode')
@@ -51,7 +54,9 @@ class ASTNode:
     right: Optional[ASTNodeT] = None  # For logical operations
     operand: Optional[ASTNodeT] = None  # For NOT
     children: Optional[List[ASTNodeT]] = None  # For PROGRAM
-
+    element_var_name: Optional[str] = None  # For capturing elements with 'as @variable'
+    loop_body: Optional[List[ASTNodeT]] = None  # For FOREACH and WHILE nodes
+    
 class Parser:
     def __init__(self, tokens: List[Token]) -> None:
         self.tokens: List[Token] = tokens
@@ -69,13 +74,11 @@ class Parser:
     def eat(self, token_type: TokenType) -> Token:
         """Consume the current token if it matches the expected type."""
         if self.current_token and self.current_token.type == token_type:
-            token: Token = self.current_token
+            token = self.current_token
             self.advance()
             return token
         else:
-            expected = token_type.name
-            found = self.current_token.type.name if self.current_token else "EOF"
-            raise SyntaxError(f"Expected {expected}, found {found} at line {self.current_token.line}, column {self.current_token.column}")
+            raise SyntaxError(f"Expected {token_type} but got {self.current_token.type if self.current_token else 'None'}")
 
     def skip_newlines(self) -> None:
         """Skip any newline tokens."""
@@ -184,22 +187,23 @@ class Parser:
         """Parse a condition factor (primary condition)."""
         if self.current_token.type == TokenType.LPAREN:
             self.eat(TokenType.LPAREN)
-            node: ASTNode = self.parse_condition()
+            node = self.parse_condition()
             self.eat(TokenType.RPAREN)
             return node
         elif self.current_token.type == TokenType.NOT:
-            token: Token = self.current_token
+            token = self.current_token
             self.eat(TokenType.NOT)
+            operand = self.parse_condition_factor()
             return ASTNode(
                 type=NodeType.CONDITION_NOT,
                 line=token.line,
                 column=token.column,
-                operand=self.parse_condition_factor()
+                operand=operand
             )
         elif self.current_token.type == TokenType.IDENTIFIER and self.current_token.value == 'exists':
             return self.parse_exists_condition()
         else:
-            raise SyntaxError(f"Expected condition at line {self.current_token.line}, column {self.current_token.column}")
+            raise SyntaxError(f"Unexpected token in condition: {self.current_token.value}")
     
     def parse_condition_term(self) -> ASTNode:
         """Parse a condition term (AND expressions)."""
@@ -470,77 +474,200 @@ class Parser:
             selectors=selectors
         )
     
-    def parse_statement(self) -> Optional[ASTNode]:
-        """Parse a single statement."""
-        if not self.current_token:
-            return None
+    def parse_element_capture(self) -> Optional[str]:
+        """Parse an optional 'as @variable' clause."""
+        if self.current_token and self.current_token.type == TokenType.AS:
+            self.eat(TokenType.AS)
+            var_token: Token = self.eat(TokenType.IDENTIFIER)
+            var_name: str = var_token.value
             
-        if self.current_token.type == TokenType.IDENTIFIER:
-            if self.current_token.value == 'goto_url':
-                return self.parse_goto_url()
-            elif self.current_token.value == 'extract':
-                return self.parse_extract()
-            elif self.current_token.value == 'extract_list':
-                return self.parse_extract_list()
-            elif self.current_token.value == 'extract_attribute':
-                return self.parse_extract_attribute()
-            elif self.current_token.value == 'extract_attribute_list':
-                return self.parse_extract_attribute_list()
-            elif self.current_token.value == 'save_row':
-                return self.parse_save_row()
-            elif self.current_token.value == 'clear_row':
-                return self.parse_clear_row()
-            elif self.current_token.value == 'set_field':
-                return self.parse_set_field()
-            elif self.current_token.value == 'log':
-                return self.parse_log()
-            elif self.current_token.value == 'throw':
-                return self.parse_throw()
-            elif self.current_token.value == 'history_forward':
-                return self.parse_history_forward()
-            elif self.current_token.value == 'history_back':
-                return self.parse_history_back()
-            elif self.current_token.value == 'click':
-                return self.parse_click()
-            elif self.current_token.value == 'timestamp':
-                return self.parse_timestamp()
-            elif self.current_token.value == 'exit':
-                return self.parse_exit()
-            else:
-                raise SyntaxError(f"Unknown command '{self.current_token.value}' at line {self.current_token.line}")
-        
-        # Handle if statements
-        if self.current_token.type == TokenType.IF:
-            return self.parse_if_statement()
-        
-        # Skip newlines between statements
-        if self.current_token.type == TokenType.NEWLINE:
-            self.skip_newlines()
-            return self.parse_statement()
+            # Validate that the variable name starts with @
+            if not var_name.startswith('@'):
+                raise SyntaxError(f"Element variable name must start with @ at line {var_token.line}, column {var_token.column}")
             
-        # If we get here, we have an unexpected token
-        raise SyntaxError(f"Unexpected token {self.current_token.type.name} at line {self.current_token.line}")
-
-    def parse(self) -> ASTNode:
-        """Parse the entire program."""
-        statements: List[ASTNode] = []
+            return var_name
+        return None
+    
+    def parse_foreach_statement(self) -> ASTNode:
+        """Parse a foreach statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.FOREACH)
         
-        # Skip any leading newlines
-        self.skip_newlines()
+        # Parse the selector list
+        selectors: List[str] = self.parse_selector_list()
         
-        # Parse statements until we reach the end of the file
-        while self.current_token and self.current_token.type != TokenType.EOF:
+        # Parse 'as @variable'
+        self.eat(TokenType.AS)
+        var_token: Token = self.eat(TokenType.IDENTIFIER)
+        element_var_name: str = var_token.value
+        
+        # Validate that the variable name starts with @
+        if not element_var_name.startswith('@'):
+            raise SyntaxError(f"Element variable name must start with @ at line {var_token.line}, column {var_token.column}")
+        
+        # We expect at least one newline after the foreach declaration
+        if self.current_token.type != TokenType.NEWLINE:
+            raise SyntaxError(f"Expected newline after foreach declaration at line {self.current_token.line}")
+        self.skip_newlines()  # Skip all consecutive newlines
+        
+        # Parse the loop body
+        loop_body: List[ASTNode] = []
+        while (self.current_token and 
+            self.current_token.type != TokenType.END_FOREACH):
             statement = self.parse_statement()
             if statement:
-                statements.append(statement)
-                
-            # Skip newlines between statements
+                loop_body.append(statement)
             self.skip_newlines()
-            
-        # Create a program node with all statements as children
+        
+        # We expect end_foreach at the end
+        self.eat(TokenType.END_FOREACH)
+        
         return ASTNode(
+            type=NodeType.FOREACH,
+            line=token.line,
+            column=token.column,
+            selectors=selectors,
+            element_var_name=element_var_name,
+            loop_body=loop_body
+        )
+
+    def parse_while_statement(self) -> ASTNode:
+        """Parse a while statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.WHILE)
+        
+        # Parse the condition
+        condition: ASTNode = self.parse_condition()
+        
+        # We expect at least one newline after the condition
+        if self.current_token.type != TokenType.NEWLINE:
+            raise SyntaxError(f"Expected newline after while condition at line {self.current_token.line}")
+        self.skip_newlines()  # Skip all consecutive newlines
+        
+        # Parse the loop body
+        loop_body: List[ASTNode] = []
+        while (self.current_token and 
+            self.current_token.type != TokenType.END_WHILE):
+            statement = self.parse_statement()
+            if statement:
+                loop_body.append(statement)
+            self.skip_newlines()
+        
+        # We expect end_while at the end
+        self.eat(TokenType.END_WHILE)
+        
+        return ASTNode(
+            type=NodeType.WHILE,
+            line=token.line,
+            column=token.column,
+            condition=condition,
+            loop_body=loop_body
+        )
+    
+    def parse_select(self) -> ASTNode:
+        """Parse a select statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.SELECT)  # Eat 'select'
+        
+        # Parse the selector list
+        selectors: List[str] = self.parse_selector_list()
+        
+        # Parse mandatory 'as @variable'
+        element_var_name: Optional[str] = self.parse_element_capture()
+        if not element_var_name:
+            raise SyntaxError(f"Select statement requires 'as @variable' at line {token.line}")
+        
+        return ASTNode(
+            type=NodeType.SELECT,
+            line=token.line,
+            column=token.column,
+            selectors=selectors,
+            element_var_name=element_var_name
+        )
+    
+    def parse_statement(self) -> Optional[ASTNode]:
+        """Parse a single statement."""
+        # Skip any newlines before the statement
+        self.skip_newlines()
+        
+        if not self.current_token or self.current_token.type == TokenType.EOF:
+            return None
+            
+        # Check statement type based on the current token
+        if self.current_token.type == TokenType.IDENTIFIER:
+            identifier = self.current_token.value
+            
+            # Parse the appropriate statement type
+            if identifier == 'goto_url':
+                node = self.parse_goto_url()
+            elif identifier == 'extract':
+                node = self.parse_extract()
+            elif identifier == 'extract_list':
+                node = self.parse_extract_list()
+            elif identifier == 'extract_attribute':
+                node = self.parse_extract_attribute()
+            elif identifier == 'extract_attribute_list':
+                node = self.parse_extract_attribute_list()
+            elif identifier == 'save_row':
+                node = self.parse_save_row()
+            elif identifier == 'clear_row':
+                node = self.parse_clear_row()
+            elif identifier == 'set_field':
+                node = self.parse_set_field()
+            elif identifier == 'log':
+                node = self.parse_log()
+            elif identifier == 'history_forward':
+                node = self.parse_history_forward()
+            elif identifier == 'history_back':
+                node = self.parse_history_back()
+            elif identifier == 'click':
+                node = self.parse_click()
+            elif identifier == 'throw':
+                node = self.parse_throw()
+            elif identifier == 'timestamp':
+                node = self.parse_timestamp()
+            elif identifier == 'exit':
+                node = self.parse_exit()
+            else:
+                raise SyntaxError(f"Unknown command: {identifier}")
+        elif self.current_token.type == TokenType.IF:
+            node = self.parse_if_statement()
+        elif self.current_token.type == TokenType.FOREACH:
+            node = self.parse_foreach_statement()
+        elif self.current_token.type == TokenType.WHILE:
+            node = self.parse_while_statement()
+        elif self.current_token.type == TokenType.SELECT:
+            node = self.parse_select()
+        elif self.current_token.type == TokenType.NEWLINE:
+            self.eat(TokenType.NEWLINE)
+            return None
+        else:
+            raise SyntaxError(f"Unexpected token: {self.current_token.value}")
+        
+        # Expect a newline after each statement (or EOF)
+        if self.current_token and self.current_token.type not in (TokenType.NEWLINE, TokenType.EOF):
+            raise SyntaxError(f"Expected newline after statement, got: {self.current_token.value}")
+        
+        # Skip the newline if there is one
+        if self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.eat(TokenType.NEWLINE)
+            
+        return node
+
+    def parse(self) -> ASTNode:
+        """Parse the tokens into an AST."""
+        # Create a root program node
+        root = ASTNode(
             type=NodeType.PROGRAM,
             line=1,
             column=1,
-            children=statements
+            children=[]
         )
+        
+        # Parse statements until we reach the end of file
+        while self.current_token and self.current_token.type != TokenType.EOF:
+            statement = self.parse_statement()
+            if statement:
+                root.children.append(statement)
+        
+        return root
