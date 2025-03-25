@@ -1,9 +1,10 @@
 from enum import Enum, auto
 from dataclasses import dataclass
-from typing import List, Optional, Any, Dict, Union, Tuple, TypeVar, cast
+from typing import List, Optional, Tuple, TypeVar
 from lexer import TokenType, Token
 
 class NodeType(Enum):
+    # Basic operations
     GOTO_URL = auto()
     EXTRACT = auto()
     EXTRACT_LIST = auto()
@@ -12,22 +13,32 @@ class NodeType(Enum):
     SAVE_ROW = auto()
     CLEAR_ROW = auto()
     SET_FIELD = auto()
-    LOG = auto()
+    
+    # Interactions
+    CLICK = auto()
     HISTORY_FORWARD = auto()
     HISTORY_BACK = auto()
-    CLICK = auto()
+    
+    # Utilities
+    LOG = auto()
     THROW = auto()
     TIMESTAMP = auto()
     EXIT = auto()
-    PROGRAM = auto() 
-    IF = auto()      
-    CONDITION_EXISTS = auto()
-    CONDITION_AND = auto()    
-    CONDITION_OR = auto()      
-    CONDITION_NOT = auto()  
+    
+    # Program structure
+    PROGRAM = auto()
+    SELECT = auto()
+    
+    # Control flow
+    IF = auto()
     FOREACH = auto()
-    WHILE = auto()           # New while loop node type
-    SELECT = auto()          # New select node type   
+    WHILE = auto()
+    
+    # Conditions
+    CONDITION_EXISTS = auto()
+    CONDITION_AND = auto()
+    CONDITION_OR = auto()
+    CONDITION_NOT = auto()
 
 # Type alias to facilitate self-referencing ASTNode
 ASTNodeT = TypeVar('ASTNodeT', bound='ASTNode')
@@ -46,22 +57,35 @@ class ASTNode:
     attribute: Optional[str] = None  # For EXTRACT_ATTRIBUTE
     selector: Optional[str] = None  # For single selector nodes
     selectors: Optional[List[str]] = None  # For nodes that support multiple selectors
+    
+    # Control flow fields
     condition: Optional[ASTNodeT] = None  # For IF nodes
     true_branch: Optional[List[ASTNodeT]] = None  # For IF nodes
     else_if_branches: Optional[List[Tuple[ASTNodeT, List[ASTNodeT]]]] = None  # For IF nodes with else_if
     false_branch: Optional[List[ASTNodeT]] = None  # For IF nodes
-    left: Optional[ASTNodeT] = None  # For logical operations
-    right: Optional[ASTNodeT] = None  # For logical operations
-    operand: Optional[ASTNodeT] = None  # For NOT
-    children: Optional[List[ASTNodeT]] = None  # For PROGRAM
+    
+    # Element handling fields
     element_var_name: Optional[str] = None  # For capturing elements with 'as @variable'
     loop_body: Optional[List[ASTNodeT]] = None  # For FOREACH and WHILE nodes
     
+    # Logical operations fields
+    left: Optional[ASTNodeT] = None  # For logical operations
+    right: Optional[ASTNodeT] = None  # For logical operations
+    operand: Optional[ASTNodeT] = None  # For NOT
+    
+    # Program structure
+    children: Optional[List[ASTNodeT]] = None  # For PROGRAM
+
 class Parser:
     def __init__(self, tokens: List[Token]) -> None:
+        """Initialize the parser with tokens from the lexer."""
         self.tokens: List[Token] = tokens
         self.pos: int = 0
         self.current_token: Optional[Token] = self.tokens[0] if tokens else None
+
+    # ======================================================================
+    # BASIC UTILITIES
+    # ======================================================================
 
     def advance(self) -> None:
         """Move to the next token."""
@@ -85,6 +109,10 @@ class Parser:
         while self.current_token and self.current_token.type == TokenType.NEWLINE:
             self.advance()
 
+    # ======================================================================
+    # SELECTOR AND ELEMENT HANDLING
+    # ======================================================================
+
     def parse_selector_list(self) -> List[str]:
         """Parse a list of selectors (string literals separated by commas)."""
         selectors: List[str] = []
@@ -100,6 +128,24 @@ class Parser:
             selectors.append(selector_token.value)
             
         return selectors
+
+    def parse_element_capture(self) -> Optional[str]:
+        """Parse an optional 'as @variable' clause."""
+        if self.current_token and self.current_token.type == TokenType.AS:
+            self.eat(TokenType.AS)
+            var_token: Token = self.eat(TokenType.IDENTIFIER)
+            var_name: str = var_token.value
+            
+            # Validate that the variable name starts with @
+            if not var_name.startswith('@'):
+                raise SyntaxError(f"Element variable name must start with @ at line {var_token.line}, column {var_token.column}")
+            
+            return var_name
+        return None
+
+    # ======================================================================
+    # BASIC STATEMENTS
+    # ======================================================================
 
     def parse_goto_url(self) -> ASTNode:
         """Parse a goto_url statement."""
@@ -135,6 +181,67 @@ class Parser:
             selectors=selectors
         )
 
+    def parse_extract_list(self) -> ASTNode:
+        """Parse an extract_list statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER)
+
+        # We expect a string argument (column name)
+        column_name_token: Token = self.eat(TokenType.STRING)
+
+        # Parse the selector list
+        selectors: List[str] = self.parse_selector_list()
+
+        return ASTNode(
+            type=NodeType.EXTRACT_LIST,
+            line=token.line,
+            column=token.column,
+            column_name=column_name_token.value,
+            selectors=selectors
+        )
+
+    def parse_extract_attribute(self) -> ASTNode:
+        """Parse an extract_attribute statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER)  # Eat 'extract_attribute'
+        
+        # We expect two string arguments (column name, attribute)
+        column_name_token: Token = self.eat(TokenType.STRING)
+        attribute_token: Token = self.eat(TokenType.STRING)
+        
+        # Parse the selector list
+        selectors: List[str] = self.parse_selector_list()
+        
+        return ASTNode(
+            type=NodeType.EXTRACT_ATTRIBUTE,
+            line=token.line,
+            column=token.column,
+            column_name=column_name_token.value,
+            attribute=attribute_token.value,
+            selectors=selectors
+        )
+    
+    def parse_extract_attribute_list(self) -> ASTNode:
+        """Parse an extract_attribute_list statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER)
+
+        # We expect two string arguments (column name, attribute)
+        column_name_token: Token = self.eat(TokenType.STRING)
+        attribute_token: Token = self.eat(TokenType.STRING)
+
+        # Parse the selector list
+        selectors: List[str] = self.parse_selector_list()
+
+        return ASTNode(
+            type=NodeType.EXTRACT_ATTRIBUTE_LIST,
+            line=token.line,
+            column=token.column,
+            column_name=column_name_token.value,
+            attribute=attribute_token.value,
+            selectors=selectors
+        )
+
     def parse_save_row(self) -> ASTNode:
         """Parse a save_row statement."""
         token: Token = self.current_token
@@ -157,6 +264,105 @@ class Parser:
             column=token.column
         )
 
+    def parse_set_field(self) -> ASTNode:
+        """Parse a set_field statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER)  # Eat 'set_field'
+        
+        # We expect two string arguments (column name and value)
+        column_name_token: Token = self.eat(TokenType.STRING)
+        value_token: Token = self.eat(TokenType.STRING)
+        
+        return ASTNode(
+            type=NodeType.SET_FIELD,
+            line=token.line,
+            column=token.column,
+            column_name=column_name_token.value,
+            value=value_token.value
+        )
+
+    def parse_click(self) -> ASTNode:
+        """Parse a click statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER) # Eat 'click'
+
+        # Parse the selector list
+        selectors: List[str] = self.parse_selector_list()
+
+        return ASTNode(
+            type=NodeType.CLICK,
+            line=token.line,
+            column=token.column,
+            selectors=selectors
+        )
+
+    def parse_log(self) -> ASTNode:
+        """Parse a log statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER) # Eat 'log'
+
+        # We expect a string argument (log message)
+        message_token: Token = self.eat(TokenType.STRING)
+
+        return ASTNode(
+            type=NodeType.LOG,
+            line=token.line,
+            column=token.column,
+            message=message_token.value
+        )
+    
+    def parse_throw(self) -> ASTNode:
+        """Parse a throw statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER) # Eat 'throw'
+
+        # We expect a string argument (error message)
+        message_token: Token = self.eat(TokenType.STRING)
+
+        return ASTNode(
+            type=NodeType.THROW,
+            line=token.line,
+            column=token.column,
+            message=message_token.value
+        )
+    
+    def parse_timestamp(self) -> ASTNode:
+        """Parse a timestamp statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER) # Eat 'timestamp'
+
+        # We expect a string argument (column name)
+        column_name_token: Token = self.eat(TokenType.STRING)
+
+        return ASTNode(
+            type=NodeType.TIMESTAMP,
+            line=token.line,
+            column=token.column,
+            column_name=column_name_token.value
+        )
+
+    def parse_history_forward(self) -> ASTNode:
+        """Parse a history_forward statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER) # Eat 'history_forward'
+
+        return ASTNode(
+            type=NodeType.HISTORY_FORWARD,
+            line=token.line,
+            column=token.column
+        )
+    
+    def parse_history_back(self) -> ASTNode:
+        """Parse a history_back statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER) # Eat 'history_back'
+
+        return ASTNode(
+            type=NodeType.HISTORY_BACK,
+            line=token.line,
+            column=token.column
+        )
+
     def parse_exit(self) -> ASTNode:
         """Parse an exit statement."""
         token: Token = self.current_token
@@ -167,79 +373,10 @@ class Parser:
             line=token.line,
             column=token.column
         )
-        
-    def parse_exists_condition(self) -> ASTNode:
-        """Parse an 'exists' condition."""
-        token: Token = self.current_token
-        self.eat(TokenType.IDENTIFIER)  # Eat 'exists'
-        
-        # Parse the selector list
-        selectors: List[str] = self.parse_selector_list()
-        
-        return ASTNode(
-            type=NodeType.CONDITION_EXISTS,
-            line=token.line,
-            column=token.column,
-            selectors=selectors
-        )
-        
-    def parse_condition_factor(self) -> ASTNode:
-        """Parse a condition factor (primary condition)."""
-        if self.current_token.type == TokenType.LPAREN:
-            self.eat(TokenType.LPAREN)
-            node = self.parse_condition()
-            self.eat(TokenType.RPAREN)
-            return node
-        elif self.current_token.type == TokenType.NOT:
-            token = self.current_token
-            self.eat(TokenType.NOT)
-            operand = self.parse_condition_factor()
-            return ASTNode(
-                type=NodeType.CONDITION_NOT,
-                line=token.line,
-                column=token.column,
-                operand=operand
-            )
-        elif self.current_token.type == TokenType.IDENTIFIER and self.current_token.value == 'exists':
-            return self.parse_exists_condition()
-        else:
-            raise SyntaxError(f"Unexpected token in condition: {self.current_token.value}")
-    
-    def parse_condition_term(self) -> ASTNode:
-        """Parse a condition term (AND expressions)."""
-        node: ASTNode = self.parse_condition_factor()
-        
-        while (self.current_token and self.current_token.type == TokenType.AND):
-            token: Token = self.current_token
-            self.eat(TokenType.AND)
-            
-            node = ASTNode(
-                type=NodeType.CONDITION_AND,
-                line=token.line,
-                column=token.column,
-                left=node,
-                right=self.parse_condition_factor()
-            )
-            
-        return node
-    
-    def parse_condition(self) -> ASTNode:
-        """Parse a condition (OR expressions)."""
-        node: ASTNode = self.parse_condition_term()
-        
-        while (self.current_token and self.current_token.type == TokenType.OR):
-            token: Token = self.current_token
-            self.eat(TokenType.OR)
-            
-            node = ASTNode(
-                type=NodeType.CONDITION_OR,
-                line=token.line,
-                column=token.column,
-                left=node,
-                right=self.parse_condition_term()
-            )
-            
-        return node
+
+    # ======================================================================
+    # CONTROL FLOW STATEMENTS
+    # ======================================================================
 
     def parse_if_statement(self) -> ASTNode:
         """Parse an if statement with optional else_if and else clauses."""
@@ -314,180 +451,6 @@ class Parser:
             false_branch=false_branch if false_branch else None
         )
 
-    def parse_set_field(self) -> ASTNode:
-        """Parse a set_field statement."""
-        token: Token = self.current_token
-        self.eat(TokenType.IDENTIFIER)  # Eat 'set_field'
-        
-        # We expect two string arguments (column name and value)
-        column_name_token: Token = self.eat(TokenType.STRING)
-        value_token: Token = self.eat(TokenType.STRING)
-        
-        return ASTNode(
-            type=NodeType.SET_FIELD,
-            line=token.line,
-            column=token.column,
-            column_name=column_name_token.value,
-            value=value_token.value
-        )
-
-    def parse_extract_attribute(self) -> ASTNode:
-        """Parse an extract_attribute statement."""
-        token: Token = self.current_token
-        self.eat(TokenType.IDENTIFIER)  # Eat 'extract_attribute'
-        
-        # We expect two string arguments (column name, attribute)
-        column_name_token: Token = self.eat(TokenType.STRING)
-        attribute_token: Token = self.eat(TokenType.STRING)
-        
-        # Parse the selector list
-        selectors: List[str] = self.parse_selector_list()
-        
-        return ASTNode(
-            type=NodeType.EXTRACT_ATTRIBUTE,
-            line=token.line,
-            column=token.column,
-            column_name=column_name_token.value,
-            attribute=attribute_token.value,
-            selectors=selectors
-        )
-    
-    def parse_log(self) -> ASTNode:
-        """Parse a log statement."""
-        token: Token = self.current_token
-        self.eat(TokenType.IDENTIFIER) # Eat 'log'
-
-        # We expect a string argument (log message)
-        message_token: Token = self.eat(TokenType.STRING)
-
-        return ASTNode(
-            type=NodeType.LOG,
-            line=token.line,
-            column=token.column,
-            message=message_token.value
-        )
-    
-    def parse_throw(self) -> ASTNode:
-        """Parse a throw statement."""
-        token: Token = self.current_token
-        self.eat(TokenType.IDENTIFIER) # Eat 'throw'
-
-        # We expect a string argument (error message)
-        message_token: Token = self.eat(TokenType.STRING)
-
-        return ASTNode(
-            type=NodeType.THROW,
-            line=token.line,
-            column=token.column,
-            message=message_token.value
-        )
-    
-    def parse_history_forward(self) -> ASTNode:
-        """Parse a history_forward statement."""
-        token: Token = self.current_token
-        self.eat(TokenType.IDENTIFIER) # Eat 'history_forward'
-
-        return ASTNode(
-            type=NodeType.HISTORY_FORWARD,
-            line=token.line,
-            column=token.column
-        )
-    
-    def parse_history_back(self) -> ASTNode:
-        """Parse a history_back statement."""
-        token: Token = self.current_token
-        self.eat(TokenType.IDENTIFIER) # Eat 'history_back'
-
-        return ASTNode(
-            type=NodeType.HISTORY_BACK,
-            line=token.line,
-            column=token.column
-        )
-    
-    def parse_click(self) -> ASTNode:
-        """Parse a click statement."""
-        token: Token = self.current_token
-        self.eat(TokenType.IDENTIFIER) # Eat 'click'
-
-        # Parse the selector list
-        selectors: List[str] = self.parse_selector_list()
-
-        return ASTNode(
-            type=NodeType.CLICK,
-            line=token.line,
-            column=token.column,
-            selectors=selectors
-        )
-    
-    def parse_timestamp(self) -> ASTNode:
-        """Parse a timestamp statement."""
-        token: Token = self.current_token
-        self.eat(TokenType.IDENTIFIER) # Eat 'timestamp'
-
-        # We expect a string argument (column name)
-        column_name_token: Token = self.eat(TokenType.STRING)
-
-        return ASTNode(
-            type=NodeType.TIMESTAMP,
-            line=token.line,
-            column=token.column,
-            column_name=column_name_token.value
-        )
-    
-    def parse_extract_list(self) -> ASTNode:
-        """Parse an extract_list statement."""
-        token: Token = self.current_token
-        self.eat(TokenType.IDENTIFIER)
-
-        # We expect a string argument (column name)
-        column_name_token: Token = self.eat(TokenType.STRING)
-
-        # Parse the selector list
-        selectors: List[str] = self.parse_selector_list()
-
-        return ASTNode(
-            type=NodeType.EXTRACT_LIST,
-            line=token.line,
-            column=token.column,
-            column_name=column_name_token.value,
-            selectors=selectors
-        )
-    
-    def parse_extract_attribute_list(self) -> ASTNode:
-        """Parse an extract_attribute_list statement."""
-        token: Token = self.current_token
-        self.eat(TokenType.IDENTIFIER)
-
-        # We expect two string arguments (column name, attribute)
-        column_name_token: Token = self.eat(TokenType.STRING)
-        attribute_token: Token = self.eat(TokenType.STRING)
-
-        # Parse the selector list
-        selectors: List[str] = self.parse_selector_list()
-
-        return ASTNode(
-            type=NodeType.EXTRACT_ATTRIBUTE_LIST,
-            line=token.line,
-            column=token.column,
-            column_name=column_name_token.value,
-            attribute=attribute_token.value,
-            selectors=selectors
-        )
-    
-    def parse_element_capture(self) -> Optional[str]:
-        """Parse an optional 'as @variable' clause."""
-        if self.current_token and self.current_token.type == TokenType.AS:
-            self.eat(TokenType.AS)
-            var_token: Token = self.eat(TokenType.IDENTIFIER)
-            var_name: str = var_token.value
-            
-            # Validate that the variable name starts with @
-            if not var_name.startswith('@'):
-                raise SyntaxError(f"Element variable name must start with @ at line {var_token.line}, column {var_token.column}")
-            
-            return var_name
-        return None
-    
     def parse_foreach_statement(self) -> ASTNode:
         """Parse a foreach statement."""
         token: Token = self.current_token
@@ -584,6 +547,87 @@ class Parser:
             selectors=selectors,
             element_var_name=element_var_name
         )
+
+    # ======================================================================
+    # CONDITION PARSING
+    # ======================================================================
+
+    def parse_exists_condition(self) -> ASTNode:
+        """Parse an 'exists' condition."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER)  # Eat 'exists'
+        
+        # Parse the selector list
+        selectors: List[str] = self.parse_selector_list()
+        
+        return ASTNode(
+            type=NodeType.CONDITION_EXISTS,
+            line=token.line,
+            column=token.column,
+            selectors=selectors
+        )
+
+    def parse_condition_factor(self) -> ASTNode:
+        """Parse a condition factor (primary condition)."""
+        if self.current_token.type == TokenType.LPAREN:
+            self.eat(TokenType.LPAREN)
+            node = self.parse_condition()
+            self.eat(TokenType.RPAREN)
+            return node
+        elif self.current_token.type == TokenType.NOT:
+            token = self.current_token
+            self.eat(TokenType.NOT)
+            operand = self.parse_condition_factor()
+            return ASTNode(
+                type=NodeType.CONDITION_NOT,
+                line=token.line,
+                column=token.column,
+                operand=operand
+            )
+        elif self.current_token.type == TokenType.IDENTIFIER and self.current_token.value == 'exists':
+            return self.parse_exists_condition()
+        else:
+            raise SyntaxError(f"Unexpected token in condition: {self.current_token.value}")
+    
+    def parse_condition_term(self) -> ASTNode:
+        """Parse a condition term (AND expressions)."""
+        node: ASTNode = self.parse_condition_factor()
+        
+        while (self.current_token and self.current_token.type == TokenType.AND):
+            token: Token = self.current_token
+            self.eat(TokenType.AND)
+            
+            node = ASTNode(
+                type=NodeType.CONDITION_AND,
+                line=token.line,
+                column=token.column,
+                left=node,
+                right=self.parse_condition_factor()
+            )
+            
+        return node
+    
+    def parse_condition(self) -> ASTNode:
+        """Parse a condition (OR expressions)."""
+        node: ASTNode = self.parse_condition_term()
+        
+        while (self.current_token and self.current_token.type == TokenType.OR):
+            token: Token = self.current_token
+            self.eat(TokenType.OR)
+            
+            node = ASTNode(
+                type=NodeType.CONDITION_OR,
+                line=token.line,
+                column=token.column,
+                left=node,
+                right=self.parse_condition_term()
+            )
+            
+        return node
+
+    # ======================================================================
+    # PROGRAM STRUCTURE
+    # ======================================================================
     
     def parse_statement(self) -> Optional[ASTNode]:
         """Parse a single statement."""
@@ -597,7 +641,7 @@ class Parser:
         if self.current_token.type == TokenType.IDENTIFIER:
             identifier = self.current_token.value
             
-            # Parse the appropriate statement type
+            # Parse the appropriate statement type based on keyword
             if identifier == 'goto_url':
                 node = self.parse_goto_url()
             elif identifier == 'extract':

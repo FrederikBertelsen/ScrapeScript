@@ -1,29 +1,39 @@
-import re
 from enum import Enum, auto
 from dataclasses import dataclass
-from typing import List, Optional, Union
+from typing import List, Optional
 
+# Token types definition
 class TokenType(Enum):
+    # Basic elements
     IDENTIFIER = auto()      # goto_url, extract, exists, etc.
     STRING = auto()          # 'text inside quotes'
     NEWLINE = auto()         # Line break
-    IF = auto()              # if keyword
-    ELSE_IF = auto()          # else_if keyword
-    ELSE = auto()            # else keyword
-    END_IF = auto()           # end_if keyword
-    AND = auto()             # and operator
-    OR = auto()              # or operator
-    NOT = auto()             # not operator
+    EOF = auto()             # End of file
+    
+    # Punctuation
     LPAREN = auto()          # (
     RPAREN = auto()          # )
     COMMA = auto()           # ,
-    EOF = auto()             # End of file
+    
+    # Logic operators
+    AND = auto()             # and operator
+    OR = auto()              # or operator
+    NOT = auto()             # not operator
+    
+    # Control structures
+    IF = auto()              # if keyword
+    ELSE = auto()            # else keyword
+    ELSE_IF = auto()         # else_if keyword
+    END_IF = auto()          # end_if keyword
+    
+    # Loop constructs
     FOREACH = auto()         # foreach keyword
     END_FOREACH = auto()     # end_foreach keyword
-    AS = auto()              # as keyword
-    FROM = auto()            # from keyword
     WHILE = auto()           # while keyword
     END_WHILE = auto()       # end_while keyword
+    
+    # Other keywords
+    AS = auto()              # as keyword
     SELECT = auto()          # select keyword
 
 @dataclass
@@ -34,25 +44,31 @@ class Token:
     column: int
 
 class Lexer:
-    # Reserved keywords
     RESERVED_KEYWORDS: dict[str, TokenType] = {
+        # Control structures
         'if': TokenType.IF,
-        'else_if': TokenType.ELSE_IF,
         'else': TokenType.ELSE,
+        'else_if': TokenType.ELSE_IF,
         'end_if': TokenType.END_IF,
+        
+        # Logic operators
         'and': TokenType.AND,
         'or': TokenType.OR,
         'not': TokenType.NOT,
+        
+        # Loop constructs
         'foreach': TokenType.FOREACH,
         'end_foreach': TokenType.END_FOREACH,
-        'as': TokenType.AS,
-        'from': TokenType.FROM,
         'while': TokenType.WHILE,
         'end_while': TokenType.END_WHILE,
+        
+        # Other keywords
+        'as': TokenType.AS,
         'select': TokenType.SELECT,
     }
 
     def __init__(self, text: str) -> None:
+        """Initialize the lexer with input text."""
         self.text: str = text
         self.pos: int = 0
         self.line: int = 1
@@ -171,7 +187,6 @@ class Lexer:
                 token = Token(TokenType.LPAREN, '(', self.line, self.column)
                 self.advance()
                 return token
-                
             if self.current_char == ')':
                 token = Token(TokenType.RPAREN, ')', self.line, self.column)
                 self.advance()

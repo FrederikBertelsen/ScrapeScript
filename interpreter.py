@@ -5,6 +5,7 @@ from parser import NodeType, ASTNode
 
 class Interpreter:
     def __init__(self, ast: ASTNode) -> None:
+        """Initialize the interpreter with an AST."""
         self.ast: ASTNode = ast
         self.current_row: Dict[str, Any] = {}  # Current row being built
         self.rows: List[Dict[str, Any]] = []  # All rows collected
@@ -14,6 +15,10 @@ class Interpreter:
         # For foreach elements: (selector, index)
         self.element_references: Dict[str, Tuple[str, Optional[int]]] = {}
 
+    # ======================================================================
+    # SELECTOR AND ELEMENT HANDLING
+    # ======================================================================
+    
     async def try_selectors(self, selectors: List[str], page: Page) -> Tuple[Optional[List[ElementHandle]], Optional[str]]:
         """Try multiple selectors until one works, supporting @variable references."""
         for selector in selectors:
@@ -77,79 +82,11 @@ class Interpreter:
         
         print(f"Warning: None of the selectors were found: {selectors}")
         return None, None
-
-    async def execute_select(self, node: ASTNode, page: Page) -> None:
-        """Execute a select statement."""
-        selectors: List[str] = cast(List[str], node.selectors)
-        element_var_name: str = cast(str, node.element_var_name)
-        
-        elements, used_selector = await self.try_selectors(selectors, page)
-        
-        if elements and element_var_name:
-            # Store the selector for this element reference (no index needed)
-            self.element_references[element_var_name] = (used_selector, None)
-            print(f"Selected element using selector '{used_selector}' as '{element_var_name}'")
-        else:
-            print(f"Warning: Could not find element for selectors: {selectors}")
-
-    async def execute_foreach(self, node: ASTNode, page: Page) -> bool:
-        """Execute a foreach statement."""
-        selectors: List[str] = cast(List[str], node.selectors)
-        element_var_name: str = cast(str, node.element_var_name)
-        loop_body: List[ASTNode] = cast(List[ASTNode], node.loop_body)
-        
-        # Get all elements matching the selector
-        elements, used_selector = await self.try_selectors(selectors, page)
-        
-        if not elements:
-            print(f"Warning: No elements found for foreach selector: {selectors}")
-            return True
-        
-        count = len(elements)
-        print(f"Found {count} elements for foreach loop with selector '{used_selector}'")
-        
-        # Process each element in the collection
-        for i in range(count):
-            try:
-                # Store the selector and index for this element reference
-                self.element_references[element_var_name] = (used_selector, i)
-                print(f"Processing element as '{element_var_name}' (element {i+1}/{count})")
-                
-                # Execute the loop body for this element
-                for statement in loop_body:
-                    continue_execution = await self.execute_node(statement, page)
-                    if not continue_execution:
-                        return False
-            except Exception as e:
-                print(f"Error processing element {i+1}: {e}")
-        
-        # Remove the element reference after the loop
-        if element_var_name in self.element_references:
-            del self.element_references[element_var_name]
-        
-        return True
-
-    async def execute_extract_attribute(self, node: ASTNode, page: Page) -> None:
-        """Execute an extract_attribute statement."""
-        column_name: str = cast(str, node.column_name)
-        selectors: List[str] = cast(List[str], node.selectors)
-        attribute: str = cast(str, node.attribute)
-        
-        elements, used_selector = await self.try_selectors(selectors, page)
-        
-        if elements and len(elements) > 0:
-            element = elements[0]
-            try:
-                attribute_text: Optional[str] = await element.get_attribute(attribute)
-                self.current_row[column_name] = attribute_text
-                print(f"Extracted '{column_name}' using selector '{used_selector}' with attribute '{attribute}': {attribute_text}")
-            except Exception as e:
-                print(f"Error extracting attribute '{attribute}' from '{used_selector}': {e}")
-                self.current_row[column_name] = None
-        else:
-            print(f"Warning: None of the selectors for '{column_name}' were found")
-            self.current_row[column_name] = None
-
+    
+    # ======================================================================
+    # DATA EXTRACTION AND MANIPULATION
+    # ======================================================================
+    
     async def execute_extract(self, node: ASTNode, page: Page) -> None:
         """Execute an extract statement."""
         column_name: str = cast(str, node.column_name)
@@ -170,36 +107,6 @@ class Interpreter:
         else:
             print(f"Warning: None of the selectors for '{column_name}' were found")
             self.current_row[column_name] = None
-
-    async def execute_click(self, node: ASTNode, page: Page) -> None:
-        """Execute a click statement."""
-        selectors: List[str] = cast(List[str], node.selectors)
-        elements, used_selector = await self.try_selectors(selectors, page)
-
-        if elements:
-            element = elements[0]
-            try:
-                await element.click()
-                await page.wait_for_load_state("networkidle")
-                print(f"Clicked on element: '{used_selector}'")
-            except Exception as e:
-                print(f"Error clicking on '{used_selector}': {e}")
-        else:
-            print(f"Warning: No elements found to click")
-
-    async def evaluate_condition_exists(self, node: ASTNode, page: Page) -> bool:
-        """Evaluate an exists condition."""
-        selectors: List[str] = cast(List[str], node.selectors)
-        elements, used_selector = await self.try_selectors(selectors, page)
-        
-        exists: bool = elements is not None and len(elements) > 0
-        
-        if exists:
-            print(f"Found element using selector: '{used_selector}'")
-        else:
-            print(f"None of the selectors were found: {selectors}")
-            
-        return exists
 
     async def execute_extract_list(self, node: ASTNode, page: Page) -> None:
         """Execute an extract_list statement."""
@@ -224,6 +131,27 @@ class Interpreter:
         else:
             print(f"Warning: None of the selectors for '{column_name}' were found")
             self.current_row[column_name] = []
+
+    async def execute_extract_attribute(self, node: ASTNode, page: Page) -> None:
+        """Execute an extract_attribute statement."""
+        column_name: str = cast(str, node.column_name)
+        selectors: List[str] = cast(List[str], node.selectors)
+        attribute: str = cast(str, node.attribute)
+        
+        elements, used_selector = await self.try_selectors(selectors, page)
+        
+        if elements and len(elements) > 0:
+            element = elements[0]
+            try:
+                attribute_text: Optional[str] = await element.get_attribute(attribute)
+                self.current_row[column_name] = attribute_text
+                print(f"Extracted '{column_name}' using selector '{used_selector}' with attribute '{attribute}': {attribute_text}")
+            except Exception as e:
+                print(f"Error extracting attribute '{attribute}' from '{used_selector}': {e}")
+                self.current_row[column_name] = None
+        else:
+            print(f"Warning: None of the selectors for '{column_name}' were found")
+            self.current_row[column_name] = None
 
     async def execute_extract_attribute_list(self, node: ASTNode, page: Page) -> None:
         """Execute an extract_attribute_list statement."""
@@ -250,12 +178,21 @@ class Interpreter:
             print(f"Warning: None of the selectors for '{column_name}' were found")
             self.current_row[column_name] = []
 
-    async def execute_goto_url(self, node: ASTNode, page: Page) -> None:
-        """Execute a goto_url statement."""
-        url: str = cast(str, node.url)
-        await page.goto(url)
-        await page.wait_for_load_state("networkidle")
-        print(f"Navigated to: {url}")
+    async def execute_set_field(self, node: ASTNode, page: Page) -> None:
+        """Execute a set_field statement."""
+        column_name: str = cast(str, node.column_name)
+        value: str = cast(str, node.value)
+        
+        self.current_row[column_name] = value
+        print(f"Set field '{column_name}' to: {value}")
+    
+    async def execute_timestamp(self, node: ASTNode, page: Page) -> None:
+        """Execute a timestamp statement."""
+        column_name: str = cast(str, node.column_name)
+        timestamp = datetime.now().isoformat()
+
+        self.current_row[column_name] = timestamp
+        print(f"Set field '{column_name}' to timestamp: {timestamp}")
 
     async def execute_save_row(self, node: ASTNode, page: Page) -> None:
         """Execute a save_row statement."""
@@ -272,31 +209,32 @@ class Interpreter:
         self.current_row = {}
         print("Cleared current row")
 
-    async def execute_set_field(self, node: ASTNode, page: Page) -> None:
-        """Execute a set_field statement."""
-        column_name: str = cast(str, node.column_name)
-        value: str = cast(str, node.value)
-        
-        self.current_row[column_name] = value
-        print(f"Set field '{column_name}' to: {value}")
+    # ======================================================================
+    # NAVIGATION AND BROWSER INTERACTION
+    # ======================================================================
+    
+    async def execute_goto_url(self, node: ASTNode, page: Page) -> None:
+        """Execute a goto_url statement."""
+        url: str = cast(str, node.url)
+        await page.goto(url)
+        await page.wait_for_load_state("networkidle")
+        print(f"Navigated to: {url}")
 
-    async def execute_log(self, node: ASTNode, page: Page) -> None:
-        """Execute a log statement."""
-        message: str = cast(str, node.message)
-        print(f"Log: {message}")
+    async def execute_click(self, node: ASTNode, page: Page) -> None:
+        """Execute a click statement."""
+        selectors: List[str] = cast(List[str], node.selectors)
+        elements, used_selector = await self.try_selectors(selectors, page)
 
-    async def execute_timestamp(self, node: ASTNode, page: Page) -> None:
-        """Execute a timestamp statement."""
-        column_name: str = cast(str, node.column_name)
-        timestamp = datetime.now().isoformat()
-
-        self.current_row[column_name] = timestamp
-        print(f"Set field '{column_name}' to timestamp: {timestamp}")
-
-    async def execute_throw(self, node: ASTNode, page: Page) -> None:
-        """Execute a throw statement."""
-        message: str = cast(str, node.message)
-        print(f"Error: {message}")
+        if elements:
+            element = elements[0]
+            try:
+                await element.click()
+                await page.wait_for_load_state("networkidle")
+                print(f"Clicked on element: '{used_selector}'")
+            except Exception as e:
+                print(f"Error clicking on '{used_selector}': {e}")
+        else:
+            print(f"Warning: No elements found to click")
 
     async def execute_history_forward(self, node: ASTNode, page: Page) -> None:
         """Execute a history_forward statement."""
@@ -308,38 +246,24 @@ class Interpreter:
         await page.go_back()
         print("Navigated back in history")
 
-    async def evaluate_condition_and(self, node: ASTNode, page: Page) -> bool:
-        """Evaluate an AND condition."""
-        left_result: bool = await self.evaluate_condition(cast(ASTNode, node.left), page)
-        if not left_result:  # Short-circuit evaluation
-            return False
-        return await self.evaluate_condition(cast(ASTNode, node.right), page)
+    # ======================================================================
+    # UTILITY ACTIONS
+    # ======================================================================
 
-    async def evaluate_condition_or(self, node: ASTNode, page: Page) -> bool:
-        """Evaluate an OR condition."""
-        left_result: bool = await self.evaluate_condition(cast(ASTNode, node.left), page)
-        if left_result:  # Short-circuit evaluation
-            return True
-        return await self.evaluate_condition(cast(ASTNode, node.right), page)
+    async def execute_log(self, node: ASTNode, page: Page) -> None:
+        """Execute a log statement."""
+        message: str = cast(str, node.message)
+        print(f"Log: {message}")
 
-    async def evaluate_condition_not(self, node: ASTNode, page: Page) -> bool:
-        """Evaluate a NOT condition."""
-        result: bool = await self.evaluate_condition(cast(ASTNode, node.operand), page)
-        return not result
+    async def execute_throw(self, node: ASTNode, page: Page) -> None:
+        """Execute a throw statement."""
+        message: str = cast(str, node.message)
+        print(f"Error: {message}")
 
-    async def evaluate_condition(self, node: ASTNode, page: Page) -> bool:
-        """Evaluate a condition and return True or False."""
-        if node.type == NodeType.CONDITION_EXISTS:
-            return await self.evaluate_condition_exists(node, page)
-        elif node.type == NodeType.CONDITION_AND:
-            return await self.evaluate_condition_and(node, page)
-        elif node.type == NodeType.CONDITION_OR:
-            return await self.evaluate_condition_or(node, page)
-        elif node.type == NodeType.CONDITION_NOT:
-            return await self.evaluate_condition_not(node, page)
-        else:
-            raise ValueError(f"Unknown condition type: {node.type}")
-
+    # ======================================================================
+    # CONTROL FLOW EXECUTION
+    # ======================================================================
+    
     async def execute_if(self, node: ASTNode, page: Page) -> bool:
         """Execute an if statement with optional else_if and else clauses."""
         # Check the main condition first
@@ -383,6 +307,43 @@ class Interpreter:
                     
         return True  # Continue execution
 
+    async def execute_foreach(self, node: ASTNode, page: Page) -> bool:
+        """Execute a foreach statement."""
+        selectors: List[str] = cast(List[str], node.selectors)
+        element_var_name: str = cast(str, node.element_var_name)
+        loop_body: List[ASTNode] = cast(List[ASTNode], node.loop_body)
+        
+        # Get all elements matching the selector
+        elements, used_selector = await self.try_selectors(selectors, page)
+        
+        if not elements:
+            print(f"Warning: No elements found for foreach selector: {selectors}")
+            return True
+        
+        count = len(elements)
+        print(f"Found {count} elements for foreach loop with selector '{used_selector}'")
+        
+        # Process each element in the collection
+        for i in range(count):
+            try:
+                # Store the selector and index for this element reference
+                self.element_references[element_var_name] = (used_selector, i)
+                print(f"Processing element as '{element_var_name}' (element {i+1}/{count})")
+                
+                # Execute the loop body for this element
+                for statement in loop_body:
+                    continue_execution = await self.execute_node(statement, page)
+                    if not continue_execution:
+                        return False
+            except Exception as e:
+                print(f"Error processing element {i+1}: {e}")
+        
+        # Remove the element reference after the loop
+        if element_var_name in self.element_references:
+            del self.element_references[element_var_name]
+        
+        return True
+
     async def execute_while(self, node: ASTNode, page: Page) -> bool:
         """Execute a while statement."""
         loop_body: List[ASTNode] = cast(List[ASTNode], node.loop_body)
@@ -413,6 +374,74 @@ class Interpreter:
                 break
         
         return True  # Continue execution after the loop
+
+    async def execute_select(self, node: ASTNode, page: Page) -> None:
+        """Execute a select statement."""
+        selectors: List[str] = cast(List[str], node.selectors)
+        element_var_name: str = cast(str, node.element_var_name)
+        
+        elements, used_selector = await self.try_selectors(selectors, page)
+        
+        if elements and element_var_name:
+            # Store the selector for this element reference (no index needed)
+            self.element_references[element_var_name] = (used_selector, None)
+            print(f"Selected element using selector '{used_selector}' as '{element_var_name}'")
+        else:
+            print(f"Warning: Could not find element for selectors: {selectors}")
+
+    # ======================================================================
+    # CONDITION EVALUATION
+    # ======================================================================
+    
+    async def evaluate_condition_exists(self, node: ASTNode, page: Page) -> bool:
+        """Evaluate an exists condition."""
+        selectors: List[str] = cast(List[str], node.selectors)
+        elements, used_selector = await self.try_selectors(selectors, page)
+        
+        exists: bool = elements is not None and len(elements) > 0
+        
+        if exists:
+            print(f"Found element using selector: '{used_selector}'")
+        else:
+            print(f"None of the selectors were found: {selectors}")
+            
+        return exists
+
+    async def evaluate_condition_and(self, node: ASTNode, page: Page) -> bool:
+        """Evaluate an AND condition."""
+        left_result: bool = await self.evaluate_condition(cast(ASTNode, node.left), page)
+        if not left_result:  # Short-circuit evaluation
+            return False
+        return await self.evaluate_condition(cast(ASTNode, node.right), page)
+
+    async def evaluate_condition_or(self, node: ASTNode, page: Page) -> bool:
+        """Evaluate an OR condition."""
+        left_result: bool = await self.evaluate_condition(cast(ASTNode, node.left), page)
+        if left_result:  # Short-circuit evaluation
+            return True
+        return await self.evaluate_condition(cast(ASTNode, node.right), page)
+
+    async def evaluate_condition_not(self, node: ASTNode, page: Page) -> bool:
+        """Evaluate a NOT condition."""
+        result: bool = await self.evaluate_condition(cast(ASTNode, node.operand), page)
+        return not result
+
+    async def evaluate_condition(self, node: ASTNode, page: Page) -> bool:
+        """Evaluate a condition and return True or False."""
+        if node.type == NodeType.CONDITION_EXISTS:
+            return await self.evaluate_condition_exists(node, page)
+        elif node.type == NodeType.CONDITION_AND:
+            return await self.evaluate_condition_and(node, page)
+        elif node.type == NodeType.CONDITION_OR:
+            return await self.evaluate_condition_or(node, page)
+        elif node.type == NodeType.CONDITION_NOT:
+            return await self.evaluate_condition_not(node, page)
+        else:
+            raise ValueError(f"Unknown condition type: {node.type}")
+
+    # ======================================================================
+    # MAIN EXECUTION LOGIC
+    # ======================================================================
     
     async def execute_node(self, node: ASTNode, page: Page) -> bool:
         """Execute a single AST node."""
