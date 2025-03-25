@@ -36,9 +36,6 @@ class PlaywrightPageAdapter(Page):
     async def goto(self, url: str) -> None:
         await self._page.goto(url)
     
-    async def wait_for_load_state(self, state: str) -> None:
-        await self._page.wait_for_load_state(state)
-    
     async def query_selector(self, selector: str) -> Optional[Element]:
         element = await self._page.query_selector(selector)
         return PlaywrightElementAdapter(element) if element else None

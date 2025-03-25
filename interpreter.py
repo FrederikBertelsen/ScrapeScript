@@ -231,7 +231,6 @@ class Interpreter:
         """Execute a goto_url statement."""
         url: str = cast(str, node.url)
         await page.goto(url)
-        await page.wait_for_load_state("networkidle")
         print(f"Navigated to: {url}")
 
     async def execute_click(self, node: ASTNode, page: Page) -> None:
@@ -243,7 +242,6 @@ class Interpreter:
             element = elements[0]
             try:
                 await element.click()
-                await page.wait_for_load_state("networkidle")
                 print(f"Clicked on element: {used_selector}")
             except Exception as e:
                 print(f"Error clicking on element: {e}")
@@ -509,6 +507,7 @@ class Interpreter:
 
     async def execute(self) -> List[Dict[str, Any]]:
         """Execute the AST and return the collected rows."""
+        browser_closed = False
         try:
             # Initialize browser automation
             self.browser_automation = BrowserFactory.create(self.browser_impl)
@@ -519,16 +518,24 @@ class Interpreter:
             if self.ast.type == NodeType.PROGRAM:
                 await self.execute_program(self.ast, self.page)
             else:
-                print(f"Error: Root node is not a program, found {self.ast.type}")
+                raise ValueError(f"Expected program node, got {self.ast.type}")
                 
             return self.rows
         except Exception as e:
             print(f"Error during script execution: {e}")
             return self.rows
         finally:
-            # Clean up resources
+            # Clean up resources in the right order
+            if self.browser and not browser_closed:
+                try:
+                    await self.browser.close()
+                    browser_closed = True
+                except Exception as e:
+                    print(f"Error closing browser: {e}")
+            
+            # Only call cleanup after browser is closed
             if self.browser_automation:
-                await self.browser_automation.cleanup()
-                self.browser = None
-                self.page = None
-                self.browser_automation = None
+                try:
+                    await self.browser_automation.cleanup()
+                except Exception as e:
+                    print(f"Error during cleanup: {e}")

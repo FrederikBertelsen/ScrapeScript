@@ -41,11 +41,6 @@ class Page(ABC):
         pass
     
     @abstractmethod
-    async def wait_for_load_state(self, state: str) -> None:
-        """Wait for the page to reach the specified load state."""
-        pass
-    
-    @abstractmethod
     async def query_selector(self, selector: str) -> Optional[Element]:
         """Query for an element matching the selector."""
         pass
