@@ -6,7 +6,7 @@ from lexer import Lexer
 from parser import Parser
 from interpreter import Interpreter
 
-async def run_script(script_path: str) -> List[Dict[str, Any]]:
+async def run_script(script_path: str, browser_impl: str = "playwright") -> List[Dict[str, Any]]:
     """Run a ScrapeScript from a file."""
     # Read the script file
     with open(script_path, 'r') as f:
@@ -21,7 +21,7 @@ async def run_script(script_path: str) -> List[Dict[str, Any]]:
     ast = parser.parse()
     
     # Execute the AST
-    interpreter = Interpreter(ast)
+    interpreter = Interpreter(ast, browser_impl=browser_impl)
     results = await interpreter.execute()
     
     return results
@@ -30,11 +30,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description='ScrapeScript: A DSL for web scraping')
     parser.add_argument('script', help='Path to the ScrapeScript file')
     parser.add_argument('-o', '--output', help='Output file path (JSON format)')
+    parser.add_argument('--browser', default='playwright', choices=['playwright'], 
+                        help='Browser automation implementation to use')
     
     args = parser.parse_args()
     
     # Run the script
-    results: List[Dict[str, Any]] = asyncio.run(run_script(args.script))
+    results: List[Dict[str, Any]] = asyncio.run(run_script(args.script, args.browser))
     
     # Print the results to stdout
     print(json.dumps(results, indent=2))

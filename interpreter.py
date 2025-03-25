@@ -1,84 +1,101 @@
 from datetime import datetime
 from typing import List, Dict, Any, Tuple, Optional, cast
-from playwright.async_api import async_playwright, Page, ElementHandle
 from parser import NodeType, ASTNode
+from browser.interface import Page, Element, Browser, BrowserAutomation
+from browser.factory import BrowserFactory
 
 class Interpreter:
-    def __init__(self, ast: ASTNode) -> None:
+    def __init__(self, ast: ASTNode, browser_impl: str = "playwright") -> None:
         """Initialize the interpreter with an AST."""
         self.ast: ASTNode = ast
         self.current_row: Dict[str, Any] = {}  # Current row being built
         self.rows: List[Dict[str, Any]] = []  # All rows collected
+        self.browser_impl = browser_impl
         
         # Store references as (selector, optional_index)
         # For select statements: (selector, None)
         # For foreach elements: (selector, index)
         self.element_references: Dict[str, Tuple[str, Optional[int]]] = {}
+        
+        # Browser automation
+        self.browser_automation: Optional[BrowserAutomation] = None
+        self.browser: Optional[Browser] = None
+        self.page: Optional[Page] = None
 
     # ======================================================================
     # SELECTOR AND ELEMENT HANDLING
     # ======================================================================
     
-    async def try_selectors(self, selectors: List[str], page: Page) -> Tuple[Optional[List[ElementHandle]], Optional[str]]:
+    async def try_selectors(self, selectors: List[str], page: Page) -> Tuple[Optional[List[Element]], Optional[str]]:
         """Try multiple selectors until one works, supporting @variable references."""
         for selector in selectors:
-            try:
-                # Handle @variable references in selectors
-                if selector.startswith('@'):
-                    parts = selector.split(' ', 1)
-                    var_name = parts[0]  # The @variable part
+            # Check if this is a combined selector with reference and descendant parts
+            # e.g., "@container .card-grid-item-card"
+            if ' ' in selector and selector.startswith('@'):
+                # Split the selector into reference and descendant parts
+                parts = selector.split(' ', 1)
+                ref_var = parts[0]  # e.g., "@container"
+                descendant = parts[1]  # e.g., ".card-grid-item-card"
+                
+                if ref_var in self.element_references:
+                    ref_selector, idx = self.element_references[ref_var]
                     
-                    if var_name not in self.element_references:
-                        print(f"Warning: Reference '{var_name}' not found")
-                        continue
-                    
-                    # Get the stored selector and index
-                    base_selector, index = self.element_references[var_name]
-                    
-                    # Get all elements matching the base selector
-                    all_elements = await page.query_selector_all(base_selector)
-                    
-                    if not all_elements or len(all_elements) == 0:
-                        print(f"Warning: No elements found with selector '{base_selector}'")
-                        continue
-                        
-                    if index is not None:
-                        # For foreach elements: get the specific element by index
-                        if index >= len(all_elements):
-                            print(f"Warning: Index {index} is out of range for elements with selector '{base_selector}'")
+                    if idx is not None:
+                        # This is an element from a foreach loop
+                        # Get the parent elements first
+                        parent_elements = await page.query_selector_all(ref_selector)
+                        if 0 <= idx < len(parent_elements):
+                            # Get the specific parent element
+                            parent_element = parent_elements[idx]
+                            # Query for the descendant within this element
+                            child_elements = await parent_element.query_selector_all(descendant)
+                            if child_elements:
+                                return child_elements, f"{ref_selector}[{idx}] {descendant}"
+                        else:
+                            print(f"Warning: Element index {idx} out of range for {ref_selector}")
                             continue
-                            
-                        element = all_elements[index]
-                        
-                        if len(parts) > 1:
-                            # Find elements within this element using additional selector
-                            descendant_selector = parts[1]
-                            descendants = await element.query_selector_all(descendant_selector)
-                            if descendants:
-                                return descendants, f"{base_selector}[{index}] {descendant_selector}"
-                        else:
-                            # Just return the element itself
-                            return [element], f"{base_selector}[{index}]"
                     else:
-                        # For select statements: use the first element
-                        element = all_elements[0]
-                        
-                        if len(parts) > 1:
-                            # Find elements within this element using additional selector
-                            descendant_selector = parts[1]
-                            descendants = await element.query_selector_all(descendant_selector)
-                            if descendants:
-                                return descendants, f"{base_selector} {descendant_selector}"
-                        else:
-                            # Just return the element itself
-                            return [element], base_selector
+                        # This is an element from a select statement
+                        # Combine the reference selector with descendant part
+                        combined_selector = f"{ref_selector} {descendant}"
+                        try:
+                            elements = await page.query_selector_all(combined_selector)
+                            if elements:
+                                return elements, combined_selector
+                        except Exception as e:
+                            print(f"Warning: Error with combined selector '{combined_selector}': {e}")
+                            continue
                 else:
-                    # Regular CSS selector
-                    elements = await page.query_selector_all(selector)
-                    if elements and len(elements) > 0:
-                        return elements, selector
+                    print(f"Warning: Unknown element reference: {ref_var}")
+                    continue
+            # Handle simple element references (variables starting with @ without descendant parts)
+            elif selector.startswith('@') and selector in self.element_references:
+                ref_selector, idx = self.element_references[selector]
+                
+                if idx is not None:
+                    # This is an element from a foreach loop
+                    elements = await page.query_selector_all(ref_selector)
+                    if 0 <= idx < len(elements):
+                        return [elements[idx]], f"{ref_selector}[{idx}]"
+                    else:
+                        print(f"Warning: Element index {idx} out of range for {ref_selector}")
+                        continue
+                else:
+                    # This is an element from a select statement
+                    elements = await page.query_selector_all(ref_selector)
+                    if elements:
+                        return elements, ref_selector
+                    else:
+                        continue
+            
+            # Regular selector (non-reference)
+            try:
+                elements = await page.query_selector_all(selector)
+                if elements and len(elements) > 0:
+                    return elements, selector
             except Exception as e:
-                print(f"Error with selector '{selector}': {e}")
+                print(f"Warning: Error with selector '{selector}': {e}")
+                continue
         
         print(f"Warning: None of the selectors were found: {selectors}")
         return None, None
@@ -97,12 +114,11 @@ class Interpreter:
         if elements:
             element = elements[0]
             try:
-                text: str = await element.text_content() or ""
-                text = text.strip()
-                self.current_row[column_name] = text
-                print(f"Extracted '{column_name}' using selector '{used_selector}': {text}")
+                text = await element.text_content()
+                self.current_row[column_name] = text.strip() if text else text
+                print(f"Extracted '{column_name}': {text}")
             except Exception as e:
-                print(f"Error extracting text from '{used_selector}': {e}")
+                print(f"Error extracting '{column_name}': {e}")
                 self.current_row[column_name] = None
         else:
             print(f"Warning: None of the selectors for '{column_name}' were found")
@@ -122,11 +138,10 @@ class Interpreter:
                     text = await element.text_content()
                     if text:
                         text_list.append(text.strip())
-                
                 self.current_row[column_name] = text_list
-                print(f"Extracted list '{column_name}' using selector '{used_selector}': {text_list[:3]}...")
+                print(f"Extracted list '{column_name}' with {len(text_list)} items")
             except Exception as e:
-                print(f"Error extracting text list from '{used_selector}': {e}")
+                print(f"Error extracting list '{column_name}': {e}")
                 self.current_row[column_name] = []
         else:
             print(f"Warning: None of the selectors for '{column_name}' were found")
@@ -143,11 +158,11 @@ class Interpreter:
         if elements and len(elements) > 0:
             element = elements[0]
             try:
-                attribute_text: Optional[str] = await element.get_attribute(attribute)
-                self.current_row[column_name] = attribute_text
-                print(f"Extracted '{column_name}' using selector '{used_selector}' with attribute '{attribute}': {attribute_text}")
+                attr_value = await element.get_attribute(attribute)
+                self.current_row[column_name] = attr_value
+                print(f"Extracted attribute '{attribute}' for '{column_name}': {attr_value}")
             except Exception as e:
-                print(f"Error extracting attribute '{attribute}' from '{used_selector}': {e}")
+                print(f"Error extracting attribute '{attribute}' for '{column_name}': {e}")
                 self.current_row[column_name] = None
         else:
             print(f"Warning: None of the selectors for '{column_name}' were found")
@@ -163,16 +178,15 @@ class Interpreter:
 
         if elements:
             try:
-                value_list = []
+                attr_values = []
                 for element in elements:
-                    value = await element.get_attribute(attribute)
-                    if value:
-                        value_list.append(value)
-                
-                self.current_row[column_name] = value_list
-                print(f"Extracted attribute list '{column_name}' using selector '{used_selector}': {value_list[:3]}...")
+                    attr_value = await element.get_attribute(attribute)
+                    if attr_value:
+                        attr_values.append(attr_value)
+                self.current_row[column_name] = attr_values
+                print(f"Extracted attribute list '{attribute}' for '{column_name}' with {len(attr_values)} items")
             except Exception as e:
-                print(f"Error extracting attribute list from '{used_selector}': {e}")
+                print(f"Error extracting attribute list '{attribute}' for '{column_name}': {e}")
                 self.current_row[column_name] = []
         else:
             print(f"Warning: None of the selectors for '{column_name}' were found")
@@ -230,9 +244,9 @@ class Interpreter:
             try:
                 await element.click()
                 await page.wait_for_load_state("networkidle")
-                print(f"Clicked on element: '{used_selector}'")
+                print(f"Clicked on element: {used_selector}")
             except Exception as e:
-                print(f"Error clicking on '{used_selector}': {e}")
+                print(f"Error clicking on element: {e}")
         else:
             print(f"Warning: No elements found to click")
 
@@ -258,7 +272,12 @@ class Interpreter:
     async def execute_throw(self, node: ASTNode, page: Page) -> None:
         """Execute a throw statement."""
         message: str = cast(str, node.message)
-        print(f"Error: {message}")
+        raise RuntimeError(f"Script error: {message}")
+
+    async def execute_exit(self, node: ASTNode, page: Page) -> bool:
+        """Execute an exit statement."""
+        print("Exiting script execution")
+        return False  # Signal to stop execution
 
     # ======================================================================
     # CONTROL FLOW EXECUTION
@@ -326,9 +345,9 @@ class Interpreter:
         # Process each element in the collection
         for i in range(count):
             try:
-                # Store the selector and index for this element reference
+                # Store this element reference with its index
                 self.element_references[element_var_name] = (used_selector, i)
-                print(f"Processing element as '{element_var_name}' (element {i+1}/{count})")
+                print(f"Processing element {i+1}/{count} in foreach loop")
                 
                 # Execute the loop body for this element
                 for statement in loop_body:
@@ -336,168 +355,180 @@ class Interpreter:
                     if not continue_execution:
                         return False
             except Exception as e:
-                print(f"Error processing element {i+1}: {e}")
+                print(f"Error in foreach loop at index {i}: {e}")
         
         # Remove the element reference after the loop
         if element_var_name in self.element_references:
             del self.element_references[element_var_name]
-        
+            
         return True
 
     async def execute_while(self, node: ASTNode, page: Page) -> bool:
-        """Execute a while statement."""
-        loop_body: List[ASTNode] = cast(List[ASTNode], node.loop_body)
+        """Execute a while loop."""
         condition: ASTNode = cast(ASTNode, node.condition)
+        loop_body: List[ASTNode] = cast(List[ASTNode], node.loop_body)
         
-        iteration_count = 0
-        max_iterations = 100  # Safety limit
+        iteration = 0
+        max_iterations = 1000  # Safety limit
         
-        while iteration_count < max_iterations:
+        while iteration < max_iterations:
             # Evaluate the condition
-            condition_result: bool = await self.evaluate_condition(condition, page)
-            print(f"While condition evaluated to: {condition_result}")
-            
+            condition_result = await self.evaluate_condition(condition, page)
             if not condition_result:
                 break
+                
+            print(f"While loop iteration {iteration+1}")
+            iteration += 1
             
             # Execute the loop body
             for statement in loop_body:
                 continue_execution = await self.execute_node(statement, page)
                 if not continue_execution:
                     return False
-            
-            iteration_count += 1
-            
-            # Check for maximum iteration safety limit
-            if iteration_count >= max_iterations:
-                print(f"Warning: Maximum iteration limit ({max_iterations}) reached in while loop")
-                break
         
-        return True  # Continue execution after the loop
+        if iteration >= max_iterations:
+            print("Warning: While loop reached maximum iterations limit")
+            
+        return True
 
     async def execute_select(self, node: ASTNode, page: Page) -> None:
         """Execute a select statement."""
         selectors: List[str] = cast(List[str], node.selectors)
-        element_var_name: str = cast(str, node.element_var_name)
+        var_name: str = cast(str, node.element_var_name)
         
+        # Get all elements matching the selector
         elements, used_selector = await self.try_selectors(selectors, page)
         
-        if elements and element_var_name:
-            # Store the selector for this element reference (no index needed)
-            self.element_references[element_var_name] = (used_selector, None)
-            print(f"Selected element using selector '{used_selector}' as '{element_var_name}'")
+        if elements and used_selector:
+            # Store the selector for later reference
+            self.element_references[var_name] = (used_selector, None)
+            print(f"Selected {len(elements)} elements as '{var_name}' using selector: {used_selector}")
         else:
-            print(f"Warning: Could not find element for selectors: {selectors}")
+            print(f"Warning: No elements found for selector: {selectors}")
 
     # ======================================================================
     # CONDITION EVALUATION
     # ======================================================================
     
-    async def evaluate_condition_exists(self, node: ASTNode, page: Page) -> bool:
-        """Evaluate an exists condition."""
-        selectors: List[str] = cast(List[str], node.selectors)
-        elements, used_selector = await self.try_selectors(selectors, page)
-        
-        exists: bool = elements is not None and len(elements) > 0
-        
-        if exists:
-            print(f"Found element using selector: '{used_selector}'")
-        else:
-            print(f"None of the selectors were found: {selectors}")
+    async def evaluate_condition(self, condition: ASTNode, page: Page) -> bool:
+        """Evaluate a condition node."""
+        if condition.type == NodeType.CONDITION_EXISTS:
+            # Check if an element exists
+            selectors: List[str] = cast(List[str], condition.selectors)
+            elements, _ = await self.try_selectors(selectors, page)
+            exists = elements is not None and len(elements) > 0
+            return exists
             
-        return exists
-
-    async def evaluate_condition_and(self, node: ASTNode, page: Page) -> bool:
-        """Evaluate an AND condition."""
-        left_result: bool = await self.evaluate_condition(cast(ASTNode, node.left), page)
-        if not left_result:  # Short-circuit evaluation
-            return False
-        return await self.evaluate_condition(cast(ASTNode, node.right), page)
-
-    async def evaluate_condition_or(self, node: ASTNode, page: Page) -> bool:
-        """Evaluate an OR condition."""
-        left_result: bool = await self.evaluate_condition(cast(ASTNode, node.left), page)
-        if left_result:  # Short-circuit evaluation
-            return True
-        return await self.evaluate_condition(cast(ASTNode, node.right), page)
-
-    async def evaluate_condition_not(self, node: ASTNode, page: Page) -> bool:
-        """Evaluate a NOT condition."""
-        result: bool = await self.evaluate_condition(cast(ASTNode, node.operand), page)
-        return not result
-
-    async def evaluate_condition(self, node: ASTNode, page: Page) -> bool:
-        """Evaluate a condition and return True or False."""
-        if node.type == NodeType.CONDITION_EXISTS:
-            return await self.evaluate_condition_exists(node, page)
-        elif node.type == NodeType.CONDITION_AND:
-            return await self.evaluate_condition_and(node, page)
-        elif node.type == NodeType.CONDITION_OR:
-            return await self.evaluate_condition_or(node, page)
-        elif node.type == NodeType.CONDITION_NOT:
-            return await self.evaluate_condition_not(node, page)
+        elif condition.type == NodeType.CONDITION_AND:
+            # Logical AND
+            left: ASTNode = cast(ASTNode, condition.left)
+            right: ASTNode = cast(ASTNode, condition.right)
+            left_result = await self.evaluate_condition(left, page)
+            if not left_result:  # Short-circuit evaluation
+                return False
+            return await self.evaluate_condition(right, page)
+            
+        elif condition.type == NodeType.CONDITION_OR:
+            # Logical OR
+            left: ASTNode = cast(ASTNode, condition.left)
+            right: ASTNode = cast(ASTNode, condition.right)
+            left_result = await self.evaluate_condition(left, page)
+            if left_result:  # Short-circuit evaluation
+                return True
+            return await self.evaluate_condition(right, page)
+            
+        elif condition.type == NodeType.CONDITION_NOT:
+            # Logical NOT
+            operand: ASTNode = cast(ASTNode, condition.operand)
+            return not await self.evaluate_condition(operand, page)
+            
         else:
-            raise ValueError(f"Unknown condition type: {node.type}")
+            raise ValueError(f"Unknown condition type: {condition.type}")
 
     # ======================================================================
-    # MAIN EXECUTION LOGIC
+    # EXECUTION MAIN LOGIC
     # ======================================================================
     
     async def execute_node(self, node: ASTNode, page: Page) -> bool:
         """Execute a single AST node."""
-        if node.type == NodeType.GOTO_URL:
-            await self.execute_goto_url(node, page)
-        elif node.type == NodeType.EXTRACT:
-            await self.execute_extract(node, page)
-        elif node.type == NodeType.EXTRACT_LIST:
-            await self.execute_extract_list(node, page)
-        elif node.type == NodeType.EXTRACT_ATTRIBUTE:
-            await self.execute_extract_attribute(node, page)
-        elif node.type == NodeType.EXTRACT_ATTRIBUTE_LIST:
-            await self.execute_extract_attribute_list(node, page)
-        elif node.type == NodeType.SAVE_ROW:
-            await self.execute_save_row(node, page)
-        elif node.type == NodeType.CLEAR_ROW:
-            await self.execute_clear_row(node, page)
-        elif node.type == NodeType.SET_FIELD:
-            await self.execute_set_field(node, page)
-        elif node.type == NodeType.IF:
-            return await self.execute_if(node, page)
-        elif node.type == NodeType.FOREACH:
-            return await self.execute_foreach(node, page)
-        elif node.type == NodeType.WHILE:
-            return await self.execute_while(node, page)
-        elif node.type == NodeType.SELECT:
-            await self.execute_select(node, page)
-        elif node.type == NodeType.LOG:
-            await self.execute_log(node, page)
-        elif node.type == NodeType.TIMESTAMP:
-            await self.execute_timestamp(node, page)
-        elif node.type == NodeType.THROW:
-            await self.execute_throw(node, page)
-            return False  # Stop execution after throwing an error
-        elif node.type == NodeType.HISTORY_FORWARD:
-            await self.execute_history_forward(node, page)
-        elif node.type == NodeType.HISTORY_BACK:
-            await self.execute_history_back(node, page)
-        elif node.type == NodeType.CLICK:
-            await self.execute_click(node, page)
-        elif node.type == NodeType.EXIT:
-            return False  # Signal to stop execution
-        return True  # Continue execution
+        try:
+            if node.type == NodeType.GOTO_URL:
+                await self.execute_goto_url(node, page)
+            elif node.type == NodeType.EXTRACT:
+                await self.execute_extract(node, page)
+            elif node.type == NodeType.EXTRACT_LIST:
+                await self.execute_extract_list(node, page)
+            elif node.type == NodeType.EXTRACT_ATTRIBUTE:
+                await self.execute_extract_attribute(node, page)
+            elif node.type == NodeType.EXTRACT_ATTRIBUTE_LIST:
+                await self.execute_extract_attribute_list(node, page)
+            elif node.type == NodeType.SAVE_ROW:
+                await self.execute_save_row(node, page)
+            elif node.type == NodeType.CLEAR_ROW:
+                await self.execute_clear_row(node, page)
+            elif node.type == NodeType.SET_FIELD:
+                await self.execute_set_field(node, page)
+            elif node.type == NodeType.CLICK:
+                await self.execute_click(node, page)
+            elif node.type == NodeType.HISTORY_BACK:
+                await self.execute_history_back(node, page)
+            elif node.type == NodeType.HISTORY_FORWARD:
+                await self.execute_history_forward(node, page)
+            elif node.type == NodeType.LOG:
+                await self.execute_log(node, page)
+            elif node.type == NodeType.THROW:
+                await self.execute_throw(node, page)
+            elif node.type == NodeType.TIMESTAMP:
+                await self.execute_timestamp(node, page)
+            elif node.type == NodeType.EXIT:
+                return await self.execute_exit(node, page)
+            elif node.type == NodeType.SELECT:
+                await self.execute_select(node, page)
+            elif node.type == NodeType.IF:
+                return await self.execute_if(node, page)
+            elif node.type == NodeType.FOREACH:
+                return await self.execute_foreach(node, page)
+            elif node.type == NodeType.WHILE:
+                return await self.execute_while(node, page)
+            else:
+                print(f"Warning: Unhandled node type: {node.type}")
+                
+            return True  # Continue execution
+        except Exception as e:
+            print(f"Error executing {node.type} node: {e}")
+            return True  # Continue execution despite errors
+
+    async def execute_program(self, node: ASTNode, page: Page) -> None:
+        """Execute a program node."""
+        statements: List[ASTNode] = cast(List[ASTNode], node.children)
+        for statement in statements:
+            continue_execution = await self.execute_node(statement, page)
+            if not continue_execution:
+                print("Script execution terminated early")
+                break
 
     async def execute(self) -> List[Dict[str, Any]]:
-        """Execute the program AST and return the collected data."""
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=False)
-            page = await browser.new_page()
+        """Execute the AST and return the collected rows."""
+        try:
+            # Initialize browser automation
+            self.browser_automation = BrowserFactory.create(self.browser_impl)
+            self.browser = await self.browser_automation.launch(headless=True)
+            self.page = await self.browser.new_page()
             
-            if self.ast.children:
-                for node in self.ast.children:
-                    continue_execution = await self.execute_node(node, page)
-                    if not continue_execution:
-                        break
-                    
-            await browser.close()
-            
-        return self.rows
+            # Execute the program
+            if self.ast.type == NodeType.PROGRAM:
+                await self.execute_program(self.ast, self.page)
+            else:
+                print(f"Error: Root node is not a program, found {self.ast.type}")
+                
+            return self.rows
+        except Exception as e:
+            print(f"Error during script execution: {e}")
+            return self.rows
+        finally:
+            # Clean up resources
+            if self.browser_automation:
+                await self.browser_automation.cleanup()
+                self.browser = None
+                self.page = None
+                self.browser_automation = None
