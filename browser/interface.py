@@ -1,6 +1,19 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional, Any, Dict, Tuple
+from typing import List, Optional, Dict, Tuple
 from browser.selector import Selector
+
+class Element(ABC):
+    """Interface for a DOM element that can be queried."""
+    
+    @abstractmethod
+    async def query(self, selector: str) -> Optional['Element']:
+        """Find the first child element matching the selector."""
+        pass
+        
+    @abstractmethod
+    async def query_all(self, selector: str) -> List['Element']:
+        """Find all child elements matching the selector."""
+        pass
 
 class BrowserAutomation(ABC):
     """Interface for browser automation libraries."""
@@ -16,38 +29,28 @@ class BrowserAutomation(ABC):
         pass
     
     @abstractmethod
-    async def extract_text(self, selectors: List[Selector]) -> Optional[str]:
-        """Extract text content from the first element matching any of the selectors."""
+    async def query_selector(self, selector: str) -> Optional[Element]:
+        """Find the first element matching the selector."""
         pass
     
     @abstractmethod
-    async def extract_texts(self, selectors: List[Selector]) -> List[str]:
-        """Extract text content from all elements matching the first working selector."""
+    async def query_selector_all(self, selector: str) -> List[Element]:
+        """Find all elements matching the selector."""
         pass
     
     @abstractmethod
-    async def extract_attribute(self, selectors: List[Selector], attribute: str) -> Optional[str]:
-        """Extract attribute value from the first element matching any of the selectors."""
+    async def extract_text(self, element: Element) -> str:
+        """Extract text content from an element."""
         pass
     
     @abstractmethod
-    async def extract_attributes(self, selectors: List[Selector], attribute: str) -> List[str]:
-        """Extract attribute values from all elements matching the first working selector."""
+    async def extract_attribute(self, element: Element, attribute: str) -> Optional[str]:
+        """Extract attribute value from an element."""
         pass
     
     @abstractmethod
-    async def click(self, selectors: List[Selector]) -> bool:
-        """Click on the first element matching any of the selectors. Returns True if successful."""
-        pass
-    
-    @abstractmethod
-    async def element_exists(self, selectors: List[Selector]) -> bool:
-        """Check if at least one element exists matching any of the selectors."""
-        pass
-    
-    @abstractmethod
-    async def get_elements_count(self, selectors: List[Selector]) -> int:
-        """Get the count of elements matching the first working selector."""
+    async def click(self, element: Element) -> bool:
+        """Click on an element. Returns True if successful."""
         pass
     
     @abstractmethod

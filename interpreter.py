@@ -1,11 +1,18 @@
 from datetime import datetime
 from typing import List, Dict, Any, Tuple, Optional, cast
 from parser import NodeType, ASTNode
-from browser.interface import BrowserAutomation
+from browser.interface import BrowserAutomation, Element
 from browser.selector import Selector
 from browser.factory import BrowserFactory
+import traceback
 
 class Interpreter:
+    _current_instance = None
+    
+    @classmethod
+    def get_current_instance(cls):
+        return cls._current_instance
+        
     def __init__(self, ast: ASTNode, browser_impl: str = "playwright") -> None:
         """Initialize the interpreter with an AST."""
         self.ast: ASTNode = ast
@@ -20,28 +27,27 @@ class Interpreter:
         
         # Browser automation
         self.browser_automation: Optional[BrowserAutomation] = None
+        
+        # Set as current instance
+        Interpreter._current_instance = self
     
     def create_selector(self, selector_str: str) -> Selector:
         """Create a Selector object from a selector string, resolving variable references."""
-        print(f"DEBUG - Creating selector for: '{selector_str}'")
-        print(f"DEBUG - Current element_references: {self.element_references}")
         
         # Variable reference with additional selector: '@var_name .some-class'
         if ' ' in selector_str and selector_str.startswith('@'):
             parts = selector_str.split(' ', 1)
             var_name = parts[0]
             child_selector = parts[1]
-            
-            print(f"DEBUG - Split into var_name: '{var_name}', selector_text: '{child_selector}'")
-            
+                        
             if var_name in self.element_references:
                 # Get the base selector for this variable
                 base_selector = self.element_references[var_name]
                 
                 # If the base selector itself is a variable reference, resolve it first
                 if base_selector.startswith('@'):
-                    # Create the parent selector by resolving the variable
-                    parent_selector = self.create_selector(var_name)
+                    # Recursively create the parent selector
+                    parent_selector = self.create_selector(base_selector)
                 else:
                     # Create the parent selector with the stored CSS
                     parent_selector = Selector(base_selector)
@@ -53,7 +59,7 @@ class Interpreter:
                 # Create and return a new selector with this parent
                 return Selector(child_selector, parent=parent_selector)
             else:
-                print(f"DEBUG - var_name '{var_name}' not found in element_references")
+                return Selector(selector_str)  # Fall back to regular selector
         
         # Just a variable reference: '@var_name'
         elif selector_str.startswith('@'):
@@ -74,15 +80,58 @@ class Interpreter:
                     
                 return selector
             else:
-                print(f"DEBUG - Single var_name '{var_name}' not found in element_references")
+                return Selector(selector_str)  # Fall back to regular selector
         
         # Regular CSS selector
-        print(f"DEBUG - Treating as regular selector: '{selector_str}'")
         return Selector(selector_str)
     
     def create_selectors(self, selector_strings: List[str]) -> List[Selector]:
         """Convert a list of selector strings to Selector objects."""
         return [self.create_selector(s) for s in selector_strings]
+
+    async def resolve_selector(self, selector: Selector) -> Optional[Element]:
+        """Resolve a Selector to an Element."""
+        if selector.parent is None:
+            # Direct page query
+            if selector.css_selector is None:
+                return None
+            return await self.browser_automation.query_selector(selector.css_selector)
+        
+        # Resolve parent first
+        parent_element = await self.resolve_selector(selector.parent)
+        if parent_element is None:
+            return None
+        
+        # No additional selector needed?
+        if selector.css_selector is None:
+            return parent_element
+            
+        # Query within parent
+        return await parent_element.query(selector.css_selector)
+    
+    async def resolve_selectors(self, selectors: List[Selector]) -> Optional[Element]:
+        """Try each selector in the list and return the first one that resolves."""
+        for selector in selectors:
+            element = await self.resolve_selector(selector)
+            if element is not None:
+                return element
+        return None
+    
+    async def resolve_all_elements(self, selector: Selector) -> List[Element]:
+        """Resolve a selector to multiple elements."""
+        if selector.parent is None:
+            if selector.css_selector is None:
+                return []
+            return await self.browser_automation.query_selector_all(selector.css_selector)
+        
+        parent_element = await self.resolve_selector(selector.parent)
+        if parent_element is None:
+            return []
+            
+        if selector.css_selector is None:
+            return [parent_element]
+            
+        return await parent_element.query_all(selector.css_selector)
 
     async def execute_goto_url(self, node: ASTNode) -> bool:
         """Execute a goto_url statement."""
@@ -97,12 +146,14 @@ class Interpreter:
         selectors: List[str] = cast(List[str], node.selectors)
         
         selector_objects = self.create_selectors(selectors)
-        text = await self.browser_automation.extract_text(selector_objects)
+        element = await self.resolve_selectors(selector_objects)
         
-        self.current_row[column_name] = text
-        if text is not None:
+        if element:
+            text = await self.browser_automation.extract_text(element)
+            self.current_row[column_name] = text
             print(f"Extracted '{column_name}': {text}")
         else:
+            self.current_row[column_name] = None
             print(f"Warning: None of the selectors for '{column_name}' were found")
         
         return True
@@ -113,7 +164,14 @@ class Interpreter:
         selectors: List[str] = cast(List[str], node.selectors)
         
         selector_objects = self.create_selectors(selectors)
-        texts = await self.browser_automation.extract_texts(selector_objects)
+        
+        # Find all elements matching the first selector that works
+        texts = []
+        for selector in selector_objects:
+            elements = await self.resolve_all_elements(selector)
+            if elements:
+                texts = [await self.browser_automation.extract_text(el) for el in elements]
+                break
         
         self.current_row[column_name] = texts
         print(f"Extracted list '{column_name}' with {len(texts)} items")
@@ -127,12 +185,14 @@ class Interpreter:
         attribute: str = cast(str, node.attribute)
         
         selector_objects = self.create_selectors(selectors)
-        value = await self.browser_automation.extract_attribute(selector_objects, attribute)
+        element = await self.resolve_selectors(selector_objects)
         
-        self.current_row[column_name] = value
-        if value is not None:
+        if element:
+            value = await self.browser_automation.extract_attribute(element, attribute)
+            self.current_row[column_name] = value
             print(f"Extracted '{column_name}' attribute '{attribute}': {value}")
         else:
+            self.current_row[column_name] = None
             print(f"Warning: None of the selectors for '{column_name}' were found")
         
         return True
@@ -144,7 +204,14 @@ class Interpreter:
         attribute: str = cast(str, node.attribute)
         
         selector_objects = self.create_selectors(selectors)
-        values = await self.browser_automation.extract_attributes(selector_objects, attribute)
+        
+        # Find all elements matching the first selector that works
+        values = []
+        for selector in selector_objects:
+            elements = await self.resolve_all_elements(selector)
+            if elements:
+                values = [await self.browser_automation.extract_attribute(el, attribute) for el in elements]
+                break
         
         self.current_row[column_name] = values
         print(f"Extracted attribute list '{column_name}.{attribute}' with {len(values)} items")
@@ -155,6 +222,7 @@ class Interpreter:
         """Execute a save_row statement."""
         # Add current row to results
         self.rows.append(self.current_row.copy())
+        self.current_row = {}
         print(f"Saved row: {self.current_row}")
         return True
 
@@ -177,14 +245,19 @@ class Interpreter:
         selectors: List[str] = cast(List[str], node.selectors)
         
         selector_objects = self.create_selectors(selectors)
-        success = await self.browser_automation.click(selector_objects)
+        element = await self.resolve_selectors(selector_objects)
         
-        if success:
-            print(f"Clicked element with one of the selectors: {selectors}")
+        if element:
+            success = await self.browser_automation.click(element)
+            if success:
+                print(f"Clicked element with one of the selectors: {selectors}")
+                return True
+            else:
+                print(f"Warning: Click operation failed")
+                return False
         else:
             print(f"Warning: None of the selectors for click were found")
-        
-        return True
+            return False
 
     async def execute_history_back(self, node: ASTNode) -> bool:
         """Execute a history_back statement."""
@@ -231,34 +304,28 @@ class Interpreter:
         # Create selector objects
         selector_objects = self.create_selectors(selectors)
         
-        # Check if any elements exist
-        exists = await self.browser_automation.element_exists(selector_objects)
-        if not exists:
-            print(f"Warning: No elements found for foreach selector: {selectors}")
-            return True
-        
-        # Find the first working selector
-        # We need to store the original selector string for variable references
+        # Find all elements for the first working selector
+        all_elements = []
         working_selector_str = None
+        
         for i, selector in enumerate(selector_objects):
-            elements = await self.browser_automation._resolve_elements(selector)
+            elements = await self.resolve_all_elements(selector)
             if elements:
+                all_elements = elements
                 working_selector_str = selectors[i]
                 break
         
-        if not working_selector_str:
-            print(f"Warning: Failed to determine working selector for foreach")
+        if not all_elements:
+            print(f"Warning: No elements found for foreach selector: {selectors}")
             return True
             
         # Save the selector string for this variable
         self.element_references[element_var_name] = working_selector_str
         
-        # Get the count of elements
-        count = await self.browser_automation.get_elements_count(selector_objects)
-        print(f"Found {count} elements for foreach loop with selector '{working_selector_str}'")
+        print(f"Found {len(all_elements)} elements for foreach loop with selector '{working_selector_str}'")
         
         # Process each element in the collection
-        for i in range(count):
+        for i, _ in enumerate(all_elements):
             # Set the index for this iteration
             self.foreach_indexes[element_var_name] = i
             
@@ -266,9 +333,15 @@ class Interpreter:
                 for statement in loop_body:
                     should_continue = await self.execute_node(statement)
                     if not should_continue:
+                        # Remove references and return
+                        if element_var_name in self.element_references:
+                            del self.element_references[element_var_name]
+                        if element_var_name in self.foreach_indexes:
+                            del self.foreach_indexes[element_var_name]
                         return False
             except Exception as e:
                 print(f"Error in foreach loop (index {i}): {e}")
+                traceback.print_exc()
         
         # Remove the element reference and index after the loop
         if element_var_name in self.element_references:
@@ -286,17 +359,11 @@ class Interpreter:
         # Create selector objects
         selector_objects = self.create_selectors(selectors)
         
-        # Check if elements exist with any selector
-        exists = await self.browser_automation.element_exists(selector_objects)
-        if not exists:
-            print(f"Warning: No elements found for selectors: {selectors}")
-            return True
-        
-        # Find the first working selector string
+        # Find the first working selector
         working_selector_str = None
         for i, selector in enumerate(selector_objects):
-            elements = await self.browser_automation._resolve_elements(selector)
-            if elements:
+            element = await self.resolve_selector(selector)
+            if element:
                 working_selector_str = selectors[i]
                 break
         
@@ -305,7 +372,7 @@ class Interpreter:
             self.element_references[var_name] = working_selector_str
             print(f"Selected elements with selector '{working_selector_str}' as {var_name}")
         else:
-            print(f"Warning: Failed to determine working selector")
+            print(f"Warning: Failed to find elements with any of the provided selectors")
             
         return True
 
@@ -314,20 +381,30 @@ class Interpreter:
         if node.type == NodeType.CONDITION_EXISTS:
             selectors: List[str] = cast(List[str], node.selectors)
             selector_objects = self.create_selectors(selectors)
-            return await self.browser_automation.element_exists(selector_objects)
+            
+            # Check if any of the selectors resolve to an element
+            for selector in selector_objects:
+                element = await self.resolve_selector(selector)
+                if element:
+                    return True
+            return False
+            
         elif node.type == NodeType.CONDITION_AND:
             left_result = await self.evaluate_condition(node.left)
             if not left_result:
                 return False
             return await self.evaluate_condition(node.right)
+            
         elif node.type == NodeType.CONDITION_OR:
             left_result = await self.evaluate_condition(node.left)
             if left_result:
                 return True
             return await self.evaluate_condition(node.right)
+            
         elif node.type == NodeType.CONDITION_NOT:
             result = await self.evaluate_condition(node.operand)
             return not result
+            
         else:
             raise ValueError(f"Invalid condition node type: {node.type}")
 
@@ -439,6 +516,7 @@ class Interpreter:
                 return True
         except Exception as e:
             print(f"Error executing node {node.type} at line {node.line}: {e}")
+            traceback.print_exc()
             raise
 
     async def execute_program(self, program: ASTNode) -> bool:
@@ -466,6 +544,7 @@ class Interpreter:
             return self.rows
         except Exception as e:
             print(f"Error executing script: {e}")
+            traceback.print_exc()
             return self.rows
         finally:
             if self.browser_automation:
