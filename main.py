@@ -10,7 +10,7 @@ from browser.factory import BrowserFactory
 # Get available browser implementations
 available_browsers = list(BrowserFactory._implementations.keys())
 
-async def run_script(script_path: str, browser_impl: str = "playwright") -> List[Dict[str, Any]]:
+async def run_script(script_path: str, browser_impl: str = "playwright", headless: bool = False) -> List[Dict[str, Any]]:
     """Run a ScrapeScript from a file."""
     # Read the script file
     with open(script_path, 'r') as f:
@@ -25,8 +25,8 @@ async def run_script(script_path: str, browser_impl: str = "playwright") -> List
     ast = parser.parse()
     
     # Execute the AST
-    interpreter = Interpreter(ast, browser_impl=browser_impl)
-    results = await interpreter.execute()
+    interpreter = Interpreter(ast)
+    results = await interpreter.execute(browser_impl=browser_impl, headless=headless)
     
     return results
 
@@ -34,13 +34,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description='ScrapeScript: A DSL for web scraping')
     parser.add_argument('script', help='Path to the ScrapeScript file')
     parser.add_argument('-o', '--output', help='Output file path (JSON format)')
-    parser.add_argument('--browser', default='playwright', choices=available_browsers, 
-                        help='Browser automation implementation to use')
+    parser.add_argument('--browser', default='playwright', choices=available_browsers, help='Browser automation implementation to use')
+    parser.add_argument('--headless', action='store_true', help='Run the browser in headless mode')
     
     args = parser.parse_args()
     
     # Run the script
-    results: List[Dict[str, Any]] = asyncio.run(run_script(args.script, args.browser))
+    results: List[Dict[str, Any]] = asyncio.run(run_script(args.script, args.browser, args.headless))
     
     # Print the results to stdout
     print(json.dumps(results, indent=2))

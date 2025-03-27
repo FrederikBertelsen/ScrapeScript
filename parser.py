@@ -6,6 +6,7 @@ from lexer import TokenType, Token
 class NodeType(Enum):
     # Basic operations
     GOTO_URL = auto()
+    GOTO_HREF = auto()
     EXTRACT = auto()
     EXTRACT_LIST = auto()
     EXTRACT_ATTRIBUTE = auto()
@@ -160,6 +161,21 @@ class Parser:
             line=token.line,
             column=token.column,
             url=url_token.value
+        )
+    
+    def parse_goto_href(self) -> ASTNode:
+        """Parse a goto_href statement."""
+        token: Token = self.current_token
+        self.eat(TokenType.IDENTIFIER) # Eat 'goto_href'
+
+        # Parse the selector list
+        selectors: List[str] = self.parse_selector_list()
+
+        return ASTNode(
+            type=NodeType.GOTO_HREF,
+            line=token.line,
+            column=token.column,
+            selectors=selectors
         )
 
     def parse_extract(self) -> ASTNode:
@@ -644,6 +660,8 @@ class Parser:
             # Parse the appropriate statement type based on keyword
             if identifier == 'goto_url':
                 node = self.parse_goto_url()
+            elif identifier == 'goto_href':
+                node = self.parse_goto_href()
             elif identifier == 'extract':
                 node = self.parse_extract()
             elif identifier == 'extract_list':

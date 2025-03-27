@@ -13,12 +13,11 @@ class Interpreter:
     def get_current_instance(cls):
         return cls._current_instance
         
-    def __init__(self, ast: ASTNode, browser_impl: str = "playwright") -> None:
+    def __init__(self, ast: ASTNode) -> None:
         """Initialize the interpreter with an AST."""
         self.ast: ASTNode = ast
-        self.current_row: Dict[str, Any] = {}  # Current row being built
+        self.current_row: Dict[str, Any] = {}  # Current row bein
         self.rows: List[Dict[str, Any]] = []  # All rows collected
-        self.browser_impl = browser_impl
         
         # Store references as selectors (CSS selector strings)
         self.element_references: Dict[str, str] = {}
@@ -46,18 +45,13 @@ class Interpreter:
                 
                 # If the base selector itself is a variable reference, resolve it first
                 if base_selector.startswith('@'):
-                    # Recursively create the parent selector
                     parent_selector = self.create_selector(base_selector)
                 else:
-                    # Create the parent selector with the stored CSS
                     parent_selector = Selector(base_selector)
-                    
-                # Add the foreach index if applicable
-                if var_name in self.foreach_indexes:
-                    parent_selector.index = self.foreach_indexes[var_name]
-                    
-                # Create and return a new selector with this parent
-                return Selector(child_selector, parent=parent_selector)
+                
+                # Pass the index as a property of the selector
+                index = self.foreach_indexes.get(var_name)
+                return Selector(child_selector, parent=parent_selector, index=index)
             else:
                 return Selector(selector_str)  # Fall back to regular selector
         
@@ -73,14 +67,14 @@ class Interpreter:
                     selector = self.create_selector(base_selector)
                 else:
                     selector = Selector(base_selector)
-                    
-                # Add the foreach index if applicable
-                if var_name in self.foreach_indexes:
-                    selector.index = self.foreach_indexes[var_name]
-                    
+
+                # Pass the index as a property of the selector
+                index = self.foreach_indexes.get(var_name)
+                if index is not None:
+                    selector.index = index
                 return selector
             else:
-                return Selector(selector_str)  # Fall back to regular selector
+                return Selector(None)  # Empty selector
         
         # Regular CSS selector
         return Selector(selector_str)
@@ -95,7 +89,15 @@ class Interpreter:
             # Direct page query
             if selector.css_selector is None:
                 return None
-            return await self.browser_automation.query_selector(selector.css_selector)
+                
+            # If we have an index, get all elements and select the one at the index
+            if selector.index is not None:
+                elements = await self.browser_automation.query_selector_all(selector.css_selector)
+                if elements and 0 <= selector.index < len(elements):
+                    return elements[selector.index]
+                return None
+            else:
+                return await self.browser_automation.query_selector(selector.css_selector)
         
         # Resolve parent first
         parent_element = await self.resolve_selector(selector.parent)
@@ -106,8 +108,15 @@ class Interpreter:
         if selector.css_selector is None:
             return parent_element
             
-        # Query within parent
-        return await parent_element.query(selector.css_selector)
+        # If we have an index, get all elements and select the one at the index
+        if selector.index is not None:
+            elements = await parent_element.query_all(selector.css_selector)
+            if elements and 0 <= selector.index < len(elements):
+                return elements[selector.index]
+            return None
+        else:
+            # Query within parent
+            return await parent_element.query(selector.css_selector)
     
     async def resolve_selectors(self, selectors: List[Selector]) -> Optional[Element]:
         """Try each selector in the list and return the first one that resolves."""
@@ -139,6 +148,26 @@ class Interpreter:
         await self.browser_automation.goto(url)
         print(f"Navigated to URL: {url}")
         return True
+    
+    async def execute_goto_href(self, node: ASTNode) -> bool:
+        """Execute a goto_href statement."""
+        selectors: List[str] = cast(List[str], node.selectors)
+        
+        selector_objects = self.create_selectors(selectors)
+        element = await self.resolve_selectors(selector_objects)
+        
+        if element:
+            href = await self.browser_automation.extract_attribute(element, "href")
+            if href:
+                await self.browser_automation.goto(href)
+                print(f"Navigated to href: {href}")
+                return True
+            else:
+                print(f"Warning: No 'href' attribute found for the element")
+                return False
+        else:
+            print(f"Warning: None of the selectors for goto_href were found")
+            return False
 
     async def execute_extract(self, node: ASTNode) -> bool:
         """Execute an extract statement."""
@@ -222,8 +251,8 @@ class Interpreter:
         """Execute a save_row statement."""
         # Add current row to results
         self.rows.append(self.current_row.copy())
-        self.current_row = {}
         print(f"Saved row: {self.current_row}")
+        self.current_row = {}
         return True
 
     async def execute_clear_row(self, node: ASTNode) -> bool:
@@ -325,23 +354,18 @@ class Interpreter:
         print(f"Found {len(all_elements)} elements for foreach loop with selector '{working_selector_str}'")
         
         # Process each element in the collection
-        for i, _ in enumerate(all_elements):
+        for i, element in enumerate(all_elements):
             # Set the index for this iteration
             self.foreach_indexes[element_var_name] = i
             
             try:
+                # Execute each statement in the loop body for this element
                 for statement in loop_body:
                     should_continue = await self.execute_node(statement)
                     if not should_continue:
-                        # Remove references and return
-                        if element_var_name in self.element_references:
-                            del self.element_references[element_var_name]
-                        if element_var_name in self.foreach_indexes:
-                            del self.foreach_indexes[element_var_name]
                         return False
             except Exception as e:
-                print(f"Error in foreach loop (index {i}): {e}")
-                traceback.print_exc()
+                print(f"Error in foreach loop iteration {i}: {e}")
         
         # Remove the element reference and index after the loop
         if element_var_name in self.element_references:
@@ -475,6 +499,8 @@ class Interpreter:
                 return await self.execute_program(node)
             elif node.type == NodeType.GOTO_URL:
                 return await self.execute_goto_url(node)
+            elif node.type == NodeType.GOTO_HREF:
+                return await self.execute_goto_href(node)
             elif node.type == NodeType.EXTRACT:
                 return await self.execute_extract(node)
             elif node.type == NodeType.EXTRACT_LIST:
@@ -531,12 +557,12 @@ class Interpreter:
         
         return True
 
-    async def execute(self) -> List[Dict[str, Any]]:
+    async def execute(self, browser_impl: str = "playwright", headless: bool = False) -> List[Dict[str, Any]]:
         """Execute the AST and return the collected rows."""
         try:
             # Create and initialize the browser automation
-            self.browser_automation = BrowserFactory.create(self.browser_impl)
-            await self.browser_automation.launch()
+            self.browser_automation = BrowserFactory.create(browser_impl)
+            await self.browser_automation.launch(headless=headless)
             
             # Execute the program
             await self.execute_program(self.ast)
