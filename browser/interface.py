@@ -1,39 +1,14 @@
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Optional, Any, Dict
+from typing import List, Optional, Any, Dict, Tuple
+from browser.selector import Selector
 
-from abc import ABC, abstractmethod
-from typing import List, Tuple, Optional, Any, Dict
-
-class Element(ABC):
-    """Interface for interacting with web page elements."""
+class BrowserAutomation(ABC):
+    """Interface for browser automation libraries."""
     
     @abstractmethod
-    async def click(self) -> None:
-        """Click on this element."""
+    async def launch(self, headless: bool = True) -> None:
+        """Launch a browser instance."""
         pass
-    
-    @abstractmethod
-    async def text_content(self) -> str:
-        """Get the text content of this element."""
-        pass
-    
-    @abstractmethod
-    async def get_attribute(self, name: str) -> Optional[str]:
-        """Get the value of an attribute on this element."""
-        pass
-    
-    @abstractmethod
-    async def query_selector(self, selector: str) -> Optional['Element']:
-        """Query for a child element matching the selector."""
-        pass
-    
-    @abstractmethod
-    async def query_selector_all(self, selector: str) -> List['Element']:
-        """Query for all child elements matching the selector."""
-        pass
-
-class Page(ABC):
-    """Interface for interacting with web pages."""
     
     @abstractmethod
     async def goto(self, url: str) -> None:
@@ -41,13 +16,38 @@ class Page(ABC):
         pass
     
     @abstractmethod
-    async def query_selector(self, selector: str) -> Optional[Element]:
-        """Query for an element matching the selector."""
+    async def extract_text(self, selectors: List[Selector]) -> Optional[str]:
+        """Extract text content from the first element matching any of the selectors."""
         pass
     
     @abstractmethod
-    async def query_selector_all(self, selector: str) -> List[Element]:
-        """Query for all elements matching the selector."""
+    async def extract_texts(self, selectors: List[Selector]) -> List[str]:
+        """Extract text content from all elements matching the first working selector."""
+        pass
+    
+    @abstractmethod
+    async def extract_attribute(self, selectors: List[Selector], attribute: str) -> Optional[str]:
+        """Extract attribute value from the first element matching any of the selectors."""
+        pass
+    
+    @abstractmethod
+    async def extract_attributes(self, selectors: List[Selector], attribute: str) -> List[str]:
+        """Extract attribute values from all elements matching the first working selector."""
+        pass
+    
+    @abstractmethod
+    async def click(self, selectors: List[Selector]) -> bool:
+        """Click on the first element matching any of the selectors. Returns True if successful."""
+        pass
+    
+    @abstractmethod
+    async def element_exists(self, selectors: List[Selector]) -> bool:
+        """Check if at least one element exists matching any of the selectors."""
+        pass
+    
+    @abstractmethod
+    async def get_elements_count(self, selectors: List[Selector]) -> int:
+        """Get the count of elements matching the first working selector."""
         pass
     
     @abstractmethod
@@ -58,27 +58,6 @@ class Page(ABC):
     @abstractmethod
     async def go_forward(self) -> None:
         """Navigate forward in browser history."""
-        pass
-
-class Browser(ABC):
-    """Interface for browser automation."""
-    
-    @abstractmethod
-    async def new_page(self) -> Page:
-        """Create a new browser page."""
-        pass
-    
-    @abstractmethod
-    async def close(self) -> None:
-        """Close the browser."""
-        pass
-
-class BrowserAutomation(ABC):
-    """Interface for browser automation libraries."""
-    
-    @abstractmethod
-    async def launch(self, headless: bool = True) -> Browser:
-        """Launch a browser instance."""
         pass
     
     @abstractmethod
