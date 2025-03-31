@@ -1,0 +1,170 @@
+[
+  {
+    "script": "test/test_scripts/extract.ss",
+    "expected": [
+      {
+        "title": "Example Domain"
+      }
+    ]
+  },
+  {
+    "script": "test/test_scripts/extract_attribute.ss",
+    "expected": [
+      {
+        "link": "https://www.iana.org/domains/example"
+      }
+    ]
+  },
+  {
+    "script": "test/test_scripts/extract_list.ss",
+    "expected": [
+      {
+        "title": [
+          "New York Times",
+          "Huffington Post",
+          "Google",
+          "Washington Post",
+          "Wordpress.com",
+          "Apple",
+          "Microsoft"
+        ]
+      }
+    ]
+  },
+  {
+    "script": "test/test_scripts/extract_attribute_list.ss",
+    "expected": [
+      {
+        "link": [
+          "http://www.nytimes.com/",
+          "http://www.huffingtonpost.com/",
+          "http://www.google.com/",
+          "http://www.washingtonpost.com/",
+          "https://wordpress.com/website/",
+          "https://www.apple.com/",
+          "https://www.microsoft.com/"
+        ]
+      }
+    ]
+  },
+  {
+    "script": "test/test_scripts/clear_row.ss",
+    "expected": [
+      {}
+    ]
+  },
+  {
+    "script": "test/test_scripts/set_field.ss",
+    "expected": [
+      {
+        "title": "This title was set"
+      }
+    ]
+  },
+  {
+    "script": "test/test_scripts/click.ss",
+    "expected": [
+      {
+        "title": "Example Domains"
+      }
+    ]
+  },
+  {
+    "script": "test/test_scripts/history.ss",
+    "expected": [
+      {
+        "title": "Example Domain"
+      },
+      {
+        "title": "Example Domains"
+      },
+      {
+        "title": "Example Domain"
+      },
+      {
+        "title": "Example Domains"
+      }
+    ]
+  },
+  {
+    "script": "test/test_scripts/exit.ss",
+    "expected": [
+      {
+        "title": "Example Domain"
+      }
+    ]
+  },
+  {
+    "script": "test/test_scripts/if.ss",
+    "expected": [
+      {
+        "title": "Example Domain"
+      },
+      {
+        "status": "Title found"
+      },
+      {
+        "status": "Else hit"
+      }
+    ]
+  },
+  {
+    "script": "test/test_scripts/save_row.ss",
+    "expected": [
+      {
+        "title": "Title has been overwritten"
+      },
+      {},
+      {
+        "title": "Example Domain"
+      }
+    ]
+  },
+  {
+    "script": "test/test_scripts/if conditions.ss",
+    "expected": [
+      {
+        "title": "Example Domain"
+      },
+      {
+        "status": "Else hit"
+      },
+      {
+        "status": "Title found"
+      }
+    ]
+  },
+  {
+    "script": "test/test_scripts/foreach.ss",
+    "expected": [
+      {
+        "text": "New York Times",
+        "url": "http://www.nytimes.com/"
+      },
+      {
+        "text": "Huffington Post",
+        "url": "http://www.huffingtonpost.com/"
+      },
+      {
+        "text": "Google",
+        "url": "http://www.google.com/"
+      },
+      {
+        "text": "Washington Post",
+        "url": "http://www.washingtonpost.com/"
+      },
+      {
+        "text": "Wordpress.com",
+        "url": "https://wordpress.com/website/"
+      },
+      {
+        "text": "Apple",
+        "url": "https://www.apple.com/"
+      },
+      {
+        "text": "Microsoft",
+        "url": "https://www.microsoft.com/"
+      }
+    ]
+  }
+]
