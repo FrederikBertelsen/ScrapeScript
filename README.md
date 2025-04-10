@@ -15,3 +15,9 @@ A DSL for web scrapping
    4. paralellism?
    5. What would be the best way to implement this?
 5. More steps?
+   1. save current url to field step
+6. fix bugs
+   1. parser doesn't pass css selectors with ":nth-child(1)" in it. no : or num chars
+   2. string does not parse numbers.
+   3. string should not parse new-lines!
+
