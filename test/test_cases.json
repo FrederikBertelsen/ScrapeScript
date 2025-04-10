@@ -62,7 +62,7 @@
     ]
   },
   {
-    "script": "test/test_scripts/click.ss",
+    "script": "test/test_scripts/goto_href.ss",
     "expected": [
       {
         "title": "Example Domains"

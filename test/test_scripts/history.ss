@@ -3,7 +3,7 @@ goto_url 'https://example.com/'
 extract 'title' 'h1'
 save_row
 
-click 'a[href]'
+goto_href 'a[href]'
 
 extract 'title' 'h1'
 save_row
