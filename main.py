@@ -62,8 +62,13 @@ def main() -> None:
     parser.add_argument('-v', '--verbose', action='store_true', help='Print verbose output')
     parser.add_argument('--browser', default='playwright', choices=available_browsers, help='Browser automation implementation to use')
     parser.add_argument('--headless', action='store_true', help='Run the browser in headless mode')
+    parser.add_argument('--single-page', action='store_true', help='Use single-page browser automation')
+
     
     args = parser.parse_args()
+
+    if (args.single_page and args.browser == 'playwright'):
+        args.browser = 'playwright_single_page'
     
     # Run the script
     results: List[Dict[str, Any]] = asyncio.run(run_script(

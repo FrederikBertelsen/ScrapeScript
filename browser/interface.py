@@ -27,6 +27,11 @@ class BrowserAutomation(ABC):
     async def goto(self, url: str) -> None:
         """Navigate to the specified URL."""
         pass
+
+    @abstractmethod
+    async def get_current_url(self) -> str:
+        """Get the current page URL."""
+        pass
     
     @abstractmethod
     async def query_selector(self, selector: str) -> Optional[Element]:

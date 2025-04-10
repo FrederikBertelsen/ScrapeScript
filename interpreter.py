@@ -5,6 +5,8 @@ from browser.interface import BrowserAutomation, Element
 from browser.selector import Selector
 from browser.factory import BrowserFactory
 import traceback
+from urllib.parse import urlparse
+
 
 class Interpreter:
     """
@@ -214,16 +216,25 @@ class Interpreter:
         element = await self.resolve_selectors(selector_objects)
 
         if element:
-            href = (await self.browser_automation.extract_attribute(element, "href")).strip()
+            href = (await self.browser_automation.extract_attribute(element, 'href')).strip()
             if href:
+                # Handle relative URLs by converting them to absolute URLs
+                if href.startswith('/'):
+                    # Get current URL to extract domain
+                    current_url = await self.browser_automation.get_current_url()
+                    # Extract domain (protocol + hostname)
+                    parsed_url = urlparse(current_url)
+                    base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+                    href = base_url + href
+                
                 await self.browser_automation.goto(href)
-                self._log(f"Followed link: {href}")
+                self._log(f"Navigated to href: {href}")
                 return True
             else:
-                self._log(f"Error: No 'href' attribute found in matched element")
+                self._log(f"No href attribute found on element")
                 return False
         else:
-            self._log(f"Error: No element found matching selectors: {selectors}")
+            self._log(f"No element found for selectors: {selectors}")
             return False
 
     async def execute_extract(self, node: ASTNode) -> bool:

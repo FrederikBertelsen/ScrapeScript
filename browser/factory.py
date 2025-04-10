@@ -1,24 +1,15 @@
 from typing import Dict, Type
 from browser.interface import BrowserAutomation
 from browser.playwright import PlaywrightAutomation
-
-# Import the new Puppeteer implementation
-try:
-    from browser.puppeteer import PuppeteerAutomation
-    PUPPETEER_AVAILABLE = True
-except ImportError:
-    PUPPETEER_AVAILABLE = False
+from browser.playwright_single_page import PlaywrightSinglePageAutomation
 
 class BrowserFactory:
     """Factory for creating browser automation instances."""
     
     _implementations: Dict[str, Type[BrowserAutomation]] = {
-        "playwright": PlaywrightAutomation
+        "playwright": PlaywrightAutomation,
+        "playwright_single_page": PlaywrightSinglePageAutomation,
     }
-    
-    # Register Puppeteer implementation if available
-    if PUPPETEER_AVAILABLE:
-        _implementations["puppeteer"] = PuppeteerAutomation
     
     @classmethod
     def create(cls, implementation: str = "playwright") -> BrowserAutomation:
