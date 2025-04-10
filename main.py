@@ -1,6 +1,7 @@
 import asyncio
 import argparse
 import json
+import csv
 from typing import Dict, List, Any
 from lexer import Lexer
 from parser import Parser
@@ -35,10 +36,29 @@ async def run_script(
     
     return results
 
+def save_results(results: List[Dict[str, Any]], output_path: str) -> None:
+    """Save the results to a file, handling JSON and CSV formats."""
+    if output_path.endswith('.json'):
+        with open(output_path, 'w') as f:
+            json.dump(results, f, indent=2)
+        print(f"Results saved to {output_path}")
+    elif output_path.endswith('.csv'):
+        if results:
+            keys = results[0].keys()
+            with open(output_path, 'w', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=keys)
+                writer.writeheader()
+                writer.writerows(results)
+            print(f"Results saved to {output_path}")
+        else:
+            print("No results to save to CSV.")
+    else:
+        print("Unsupported output file format.  Please use .json or .csv.")
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='ScrapeScript: A DSL for web scraping')
     parser.add_argument('script', help='Path to the ScrapeScript file')
-    parser.add_argument('-o', '--output', help='Output file path (JSON format)')
+    parser.add_argument('-o', '--output', help='Output file path (JSON or CSV format)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Print verbose output')
     parser.add_argument('--browser', default='playwright', choices=available_browsers, help='Browser automation implementation to use')
     parser.add_argument('--headless', action='store_true', help='Run the browser in headless mode')
@@ -58,9 +78,7 @@ def main() -> None:
     
     # Save to file if requested
     if args.output:
-        with open(args.output, 'w') as f:
-            json.dump(results, f, indent=2)
-        print(f"Results saved to {args.output}")
+        save_results(results, args.output)
 
 if __name__ == '__main__':
     main()
