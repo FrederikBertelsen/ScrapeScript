@@ -63,48 +63,42 @@ class Interpreter:
         """
         # Variable reference with additional selector: '@var_name .some-class'
         if ' ' in selector_str and selector_str.startswith('@'):
-            parts = selector_str.split(' ', 1)
-            var_name = parts[0]
-            child_selector = parts[1]
-
-            if var_name in self.element_references:
-                # Get the base selector for this variable
-                base_selector = self.element_references[var_name]
-
-                # If the base selector itself is a variable reference, resolve it first
-                if base_selector.startswith('@'):
-                    parent_selector = self.create_selector(base_selector)
-                else:
-                    parent_selector = Selector(base_selector)
-
-                # Pass the index as a property of the selector
-                index = self.foreach_indexes.get(var_name)
-                return Selector(child_selector, parent=parent_selector, index=index)
-            else:
-                self._log(f"Warning: Variable '{var_name}' not found, treating as literal selector")
-                return Selector(selector_str)
-
-        # Just a variable reference: '@var_name'
+            # Split at first space
+            var_name, child_selector = selector_str.split(' ', 1)
+            
+            # Look up the variable reference
+            if var_name not in self.element_references:
+                raise ValueError(f"Unknown element reference: {var_name}")
+            
+            # Get the actual CSS selector that the reference points to
+            parent_css = self.element_references[var_name]
+            
+            # Create a parent selector using the actual CSS value
+            parent_selector = Selector(parent_css)
+            
+            # If this is a foreach variable, apply the current index
+            if var_name in self.foreach_indexes:
+                parent_selector.index = self.foreach_indexes[var_name]
+            
+            # Create a child selector with the parent
+            return Selector(child_selector, parent=parent_selector)
+            
         elif selector_str.startswith('@'):
+            # Direct variable reference
             var_name = selector_str
-
-            if var_name in self.element_references:
-                base_selector = self.element_references[var_name]
-
-                # If the base selector itself is a variable reference, resolve it recursively
-                if base_selector.startswith('@'):
-                    selector = self.create_selector(base_selector)
-                else:
-                    selector = Selector(base_selector)
-
-                # Pass the index as a property of the selector
-                index = self.foreach_indexes.get(var_name)
-                if index is not None:
-                    selector.index = index
-                return selector
-            else:
-                self._log(f"Warning: Variable '{var_name}' not defined, returning empty selector")
-                return Selector(None)  # Empty selector
+            
+            if var_name not in self.element_references:
+                raise ValueError(f"Unknown element reference: {var_name}")
+            
+            # Get the actual CSS selector value, not the reference name
+            css_selector = self.element_references[var_name]
+            selector = Selector(css_selector)
+            
+            # If this is a foreach variable, apply the current index
+            if var_name in self.foreach_indexes:
+                selector.index = self.foreach_indexes[var_name]
+                
+            return selector
 
         # Regular CSS selector
         return Selector(selector_str)
@@ -466,7 +460,7 @@ class Interpreter:
     async def execute_foreach(self, node: ASTNode) -> bool:
         """
         Execute a foreach loop over elements matching the specified selector.
-        
+
         Creates a variable reference that can be used in nested operations
         to refer to the current element in the iteration.
         """
@@ -479,21 +473,33 @@ class Interpreter:
 
         # Find first working selector and get matching elements
         all_elements = []
+        working_selector = None
         working_selector_str = None
 
         for i, selector in enumerate(selector_objects):
-            elements = await self.resolve_all_elements(selector)
-            if elements:
-                all_elements = elements
-                working_selector_str = selectors[i]
-                break
+            try:
+                elements = await self.resolve_all_elements(selector)
+                if elements:
+                    all_elements = elements
+                    working_selector = selector
+                    working_selector_str = selectors[i]
+                    break
+            except Exception as e:
+                self._log(f"Error resolving selector '{selectors[i]}': {str(e)}")
+                continue
 
         if not all_elements:
             self._log(f"No elements found for foreach loop with selectors: {selectors}")
             return True  # Continue execution despite no elements found
 
-        # Store the selector string for variable references within the loop
-        self.element_references[element_var_name] = working_selector_str
+        # Store the CSS selector for variable references within the loop
+        # Important: Store the actual CSS selector, not the reference with @
+        if working_selector and working_selector.css_selector:
+            actual_css = working_selector.css_selector
+            self.element_references[element_var_name] = actual_css
+        else:
+            # Fallback to the original selector string (this won't work if it has @references)
+            self.element_references[element_var_name] = working_selector_str
 
         self._log(f"Iterating through {len(all_elements)} elements using selector '{working_selector_str}'")
 
