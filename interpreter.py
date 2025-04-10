@@ -37,6 +37,9 @@ class Interpreter:
         self.element_references: Dict[str, str] = {}
         # Track current index for each foreach loop variable
         self.foreach_indexes: Dict[str, int] = {}
+        
+        # Stack to track row state at different loop nesting levels
+        self.row_state_stack: List[Dict[str, Any]] = []
 
         # Browser automation interface (initialized during execution)
         self.browser_automation: Optional[BrowserAutomation] = None
@@ -331,7 +334,8 @@ class Interpreter:
 
     async def execute_save_row(self, node: ASTNode) -> bool:
         """
-        Save the current data row to the results collection and clear it.
+        Save the current data row to the results collection and restore it to the state
+        before entering the loop (or empty if not in a loop).
         
         Returns:
             True to continue script execution
@@ -340,7 +344,17 @@ class Interpreter:
         self.rows.append(self.current_row.copy())
         col_count = len(self.current_row)
         self._log(f"Saved data row #{len(self.rows)} with {col_count} fields")
-        self.current_row = {}
+        
+        # Restore row state from the most recent loop context
+        if self.row_state_stack:
+            # Restore to the state before entering the loop
+            self.current_row = self.row_state_stack[-1].copy()
+            self._log(f"Restored row state with {len(self.current_row)} fields from loop context")
+        else:
+            # Not in a loop, clear the row
+            self.current_row = {}
+            self._log("No loop context found, cleared current row")
+            
         return True
 
     async def execute_clear_row(self, node: ASTNode) -> bool:
@@ -502,28 +516,37 @@ class Interpreter:
             self.element_references[element_var_name] = working_selector_str
 
         self._log(f"Iterating through {len(all_elements)} elements using selector '{working_selector_str}'")
+        
+        # Save current row state before entering the loop
+        self.row_state_stack.append(self.current_row.copy())
+        self._log(f"Saved row state with {len(self.current_row)} fields before entering foreach loop")
 
-        # Process each element in the collection
-        for i, element in enumerate(all_elements):
-            # Set the current iteration index
-            self.foreach_indexes[element_var_name] = i
-            
-            try:
-                # Execute each statement in the loop body
-                for statement in loop_body:
-                    should_continue = await self.execute_node(statement)
-                    if not should_continue:
-                        self._log("Loop terminated early due to exit condition")
-                        return False
-            except Exception as e:
-                self._log(f"Error in foreach iteration {i}/{len(all_elements)}: {str(e)}")
-                raise  # Re-raise to maintain error propagation
-
-        # Clean up variable references after loop completion
-        if element_var_name in self.element_references:
-            del self.element_references[element_var_name]
-        if element_var_name in self.foreach_indexes:
-            del self.foreach_indexes[element_var_name]
+        try:
+            # Process each element in the collection
+            for i, element in enumerate(all_elements):
+                # Set the current iteration index
+                self.foreach_indexes[element_var_name] = i
+                
+                try:
+                    # Execute each statement in the loop body
+                    for statement in loop_body:
+                        should_continue = await self.execute_node(statement)
+                        if not should_continue:
+                            return False
+                except Exception as e:
+                    self._log(f"Error in foreach iteration {i}/{len(all_elements)}: {str(e)}")
+                    raise  # Re-raise to maintain error propagation
+        finally:
+            # Clean up variable references after loop completion
+            if element_var_name in self.element_references:
+                del self.element_references[element_var_name]
+            if element_var_name in self.foreach_indexes:
+                del self.foreach_indexes[element_var_name]
+                
+            # Remove the row state for this loop
+            if self.row_state_stack:
+                self.row_state_stack.pop()
+                self._log("Restored previous row state context after foreach loop")
 
         return True
 
@@ -619,8 +642,7 @@ class Interpreter:
                 else_if_result = await self.evaluate_condition(condition)
                 if else_if_result:
                     executed_branch = True
-                    self._log(f"Else-if condition {i+1} evaluated to true, executing branch")
-                    
+                    self._log(f"Else-if condition #{i+1} evaluated to true, executing branch")
                     for statement in statements:
                         should_continue = await self.execute_node(statement)
                         if not should_continue:
@@ -652,22 +674,31 @@ class Interpreter:
         """
         loop_body: List[ASTNode] = cast(List[ASTNode], node.loop_body)
 
-        # Loop as long as the condition is true
-        iteration = 0
-        max_iterations = 1000  # Safety limit to prevent infinite loops
+        # Save current row state before entering the loop
+        self.row_state_stack.append(self.current_row.copy())
+        self._log(f"Saved row state with {len(self.current_row)} fields before entering while loop")
 
-        while await self.evaluate_condition(node.condition):
-            iteration += 1
-            if iteration > max_iterations:
-                self._log(f"Loop safety limit reached ({max_iterations} iterations) - terminating while loop")
-                break
+        try:
+            # Loop as long as the condition is true
+            iteration = 0
+            max_iterations = 1000  # Safety limit to prevent infinite loops
 
-            self._log(f"While loop iteration {iteration}")
-            for statement in loop_body:
-                should_continue = await self.execute_node(statement)
-                if not should_continue:
-                    self._log("While loop terminated early due to exit condition")
-                    return False
+            while await self.evaluate_condition(node.condition):
+                iteration += 1
+                if iteration > max_iterations:
+                    self._log(f"Loop safety limit reached ({max_iterations} iterations) - terminating while loop")
+                    break
+
+                self._log(f"While loop iteration {iteration}")
+                for statement in loop_body:
+                    should_continue = await self.execute_node(statement)
+                    if not should_continue:
+                        return False
+        finally:
+            # Remove the row state for this loop
+            if self.row_state_stack:
+                self.row_state_stack.pop()
+                self._log("Restored previous row state context after while loop")
 
         return True
 
@@ -721,7 +752,7 @@ class Interpreter:
             elif node.type == NodeType.SELECT:
                 return await self.execute_select(node)
             else:
-                self._log(f"Unsupported node type encountered: {node.type}")
+                self._log(f"Unknown node type: {node.type}")
                 return True
         except Exception as e:
             print(f"Error at line {node.line}: {str(e)}")
@@ -741,7 +772,6 @@ class Interpreter:
         for node in program.children:
             should_continue = await self.execute_node(node)
             if not should_continue:
-                self._log("Program execution terminated early")
                 return False
 
         return True
