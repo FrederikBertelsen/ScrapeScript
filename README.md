@@ -24,6 +24,9 @@ This modular approach ensures that as browser technologies evolve, ScrapeScript 
    5. What would be the best way to implement this?
 5. More steps?
    1. save current url to field step
+   2. save time to field step
+   3. extract html of selector?
+   4. download image
 6. fix bugs
    1. parser doesn't pass css selectors with ":nth-child(1)" in it. no : or num chars
    2. string does not parse numbers.
