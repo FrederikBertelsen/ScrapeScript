@@ -1,11 +1,14 @@
 from datetime import datetime
-from typing import List, Dict, Any, cast, Optional
+from typing import List, Dict, Any, cast, Optional, Set
 from parser import NodeType, ASTNode
 from browser.interface import BrowserAutomation, Element
 from browser.selector import Selector
 from browser.factory import BrowserFactory
 import traceback
 from urllib.parse import urlparse
+import csv
+import json
+import re
 
 
 class Interpreter:
@@ -34,6 +37,11 @@ class Interpreter:
 
         self.current_row: Dict[str, Any] = {}  # Current data row being assembled
         self.rows: List[Dict[str, Any]] = []  # Collected data rows
+        
+        # Data schema variables and their values
+        self.data_schema: Dict[str, str] = {}  # Map of variable names to column names
+        self.current_data_row: Dict[str, Any] = {}  # Current data row being processed
+        self.data_rows: List[Dict[str, Any]] = []  # Data rows loaded from file
 
         # Map of variable names to their CSS selector strings
         self.element_references: Dict[str, str] = {}
@@ -200,6 +208,10 @@ class Interpreter:
             True to continue script execution
         """
         url: str = cast(str, node.url)
+        
+        # Apply variable substitution
+        url = self.substitute_variables(url)
+        
         await self.browser_automation.goto(url)
         self._log(f"Navigated to: {url}")
         return True
@@ -246,7 +258,11 @@ class Interpreter:
         """
         column_name: str = cast(str, node.column_name)
         selectors: List[str] = cast(List[str], node.selectors)
-        selector_objects = self.create_selectors(selectors)
+        
+        # Apply variable substitution to each selector
+        resolved_selectors = [self.substitute_variables(selector) for selector in selectors]
+        selector_objects = self.create_selectors(resolved_selectors)
+        
         element = await self.resolve_selectors(selector_objects)
 
         if element:
@@ -255,7 +271,7 @@ class Interpreter:
             self._log(f"Extracted '{column_name}': '{text[:50]}{'...' if len(text) > 50 else ''}'")
         else:
             self.current_row[column_name] = None
-            self._log(f"Warning: No element found for '{column_name}' using selectors: {selectors}")
+            self._log(f"Warning: No element found for '{column_name}' using selectors: {resolved_selectors}")
 
         return True
 
@@ -299,16 +315,21 @@ class Interpreter:
         column_name: str = cast(str, node.column_name)
         selectors: List[str] = cast(List[str], node.selectors)
         attribute: str = cast(str, node.attribute)
-        selector_objects = self.create_selectors(selectors)
+        
+        # Apply variable substitution to selectors and attribute
+        resolved_selectors = [self.substitute_variables(selector) for selector in selectors]
+        resolved_attribute = self.substitute_variables(attribute)
+        
+        selector_objects = self.create_selectors(resolved_selectors)
         element = await self.resolve_selectors(selector_objects)
 
         if element:
-            value = (await self.browser_automation.extract_attribute(element, attribute)).strip()
+            value = (await self.browser_automation.extract_attribute(element, resolved_attribute)).strip()
             self.current_row[column_name] = value
-            self._log(f"Extracted '{column_name}' attribute '{attribute}': '{value[:50]}{'...' if len(value) > 50 else ''}'")
+            self._log(f"Extracted '{column_name}' attribute '{resolved_attribute}': '{value[:50]}{'...' if len(value) > 50 else ''}'")
         else:
             self.current_row[column_name] = None
-            self._log(f"Warning: No element found for attribute '{attribute}' using selectors: {selectors}")
+            self._log(f"Warning: No element found for attribute '{resolved_attribute}' using selectors: {resolved_selectors}")
 
         return True
 
@@ -322,7 +343,12 @@ class Interpreter:
         column_name: str = cast(str, node.column_name)
         selectors: List[str] = cast(List[str], node.selectors)
         attribute: str = cast(str, node.attribute)
-        selector_objects = self.create_selectors(selectors)
+        
+        # Apply variable substitution to each selector and the attribute
+        resolved_selectors = [self.substitute_variables(selector) for selector in selectors]
+        resolved_attribute = self.substitute_variables(attribute)
+        
+        selector_objects = self.create_selectors(resolved_selectors)
 
         # Find all elements matching the first selector that works
         values = []
@@ -331,15 +357,15 @@ class Interpreter:
         for i, selector in enumerate(selector_objects):
             elements = await self.resolve_all_elements(selector)
             if elements:
-                values = [(await self.browser_automation.extract_attribute(el, attribute)).strip() for el in elements]
-                working_selector = selectors[i]
+                values = [(await self.browser_automation.extract_attribute(el, resolved_attribute)).strip() for el in elements]
+                working_selector = resolved_selectors[i]
                 break
 
         self.current_row[column_name] = values
         if values:
-            self._log(f"Extracted attribute '{attribute}' list for '{column_name}' with {len(values)} items using '{working_selector}'")
+            self._log(f"Extracted attribute '{resolved_attribute}' list for '{column_name}' with {len(values)} items using '{working_selector}'")
         else:
-            self._log(f"Warning: No elements found for attribute list '{column_name}.{attribute}' using any selectors")
+            self._log(f"Warning: No elements found for attribute list '{column_name}.{resolved_attribute}' using any selectors")
 
         return True
 
@@ -389,8 +415,13 @@ class Interpreter:
         """
         column_name: str = cast(str, node.column_name)
         value: str = cast(str, node.value)
-        self.current_row[column_name] = value
-        self._log(f"Set field '{column_name}' = '{value}'")
+        
+        # Apply variable substitution
+        resolved_column_name = self.substitute_variables(column_name)
+        resolved_value = self.substitute_variables(value)
+        
+        self.current_row[resolved_column_name] = resolved_value
+        self._log(f"Set field '{resolved_column_name}' = '{resolved_value}'")
         return True
 
     async def execute_click(self, node: ASTNode) -> bool:
@@ -401,7 +432,11 @@ class Interpreter:
             True to continue script execution, False if click failed
         """
         selectors: List[str] = cast(List[str], node.selectors)
-        selector_objects = self.create_selectors(selectors)
+        
+        # Apply variable substitution to each selector
+        resolved_selectors = [self.substitute_variables(selector) for selector in selectors]
+        selector_objects = self.create_selectors(resolved_selectors)
+        
         element = await self.resolve_selectors(selector_objects)
 
         if element:
@@ -413,7 +448,7 @@ class Interpreter:
                 self._log(f"Error: Click operation failed (element might be blocked or not clickable)")
                 return False
         else:
-            self._log(f"Error: No clickable element found matching selectors: {selectors}")
+            self._log(f"Error: No clickable element found matching selectors: {resolved_selectors}")
             return False
 
     async def execute_history_back(self, node: ASTNode) -> bool:
@@ -594,11 +629,13 @@ class Interpreter:
         """
         Evaluate a conditional expression and return the boolean result.
         
-        Handles EXISTS, AND, OR, and NOT condition types.
+        Handles EXISTS, AND, OR, NOT, and IS_EMPTY condition types.
         """
         if node.type == NodeType.CONDITION_EXISTS:
             selectors: List[str] = cast(List[str], node.selectors)
-            selector_objects = self.create_selectors(selectors)
+            # Apply variable substitution to each selector
+            resolved_selectors = [self.substitute_variables(selector) for selector in selectors]
+            selector_objects = self.create_selectors(resolved_selectors)
 
             # Check if any selector resolves to an element
             for selector in selector_objects:
@@ -625,6 +662,24 @@ class Interpreter:
             # Negate the evaluation of the operand
             result = await self.evaluate_condition(node.operand)
             return not result
+            
+        elif node.type == NodeType.CONDITION_IS_EMPTY:
+            # Check if a variable or string value is empty
+            value = node.value
+            
+            # Apply variable substitution if this is a string
+            if isinstance(value, str):
+                if value.startswith('$'):
+                    # Direct variable reference
+                    value = self.resolve_variable(value)
+                else:
+                    # String that might contain variables
+                    value = self.substitute_variables(value)
+                
+            # Check if value is empty (None, empty string, empty list, etc.)
+            is_empty = value is None or value == '' or (hasattr(value, '__len__') and len(value) == 0)
+            self._log(f"Is_empty condition check: '{value}' -> {is_empty}")
+            return is_empty
 
         else:
             raise ValueError(f"Unsupported condition type: {node.type}")
@@ -635,7 +690,7 @@ class Interpreter:
         
         Evaluates a condition and executes appropriate branch (if/else-if/else).
         """
-        # Evaluate the condition
+        # Apply any variable substitution in the condition and evaluate it
         condition_result = await self.evaluate_condition(node.condition)
 
         if condition_result:
@@ -762,6 +817,10 @@ class Interpreter:
                 return await self.execute_while(node)
             elif node.type == NodeType.SELECT:
                 return await self.execute_select(node)
+            elif node.type == NodeType.DATA_SCHEMA:
+                return await self.execute_data_schema(node)
+            elif node.type == NodeType.IS_EMPTY:
+                return await self.evaluate_is_empty(node)
             else:
                 self._log(f"Unknown node type: {node.type}")
                 return True
@@ -787,15 +846,16 @@ class Interpreter:
 
         return True
 
-    async def execute(self, browser_impl: str = "playwright", headless: bool = False) -> List[Dict[str, Any]]:
+    async def execute(self, browser_impl: str = "playwright", headless: bool = False, data_file: str = None) -> List[Dict[str, Any]]:
         """
         Main entry point for script execution.
         
-        Initializes browser automation, executes the program, and returns collected results.
+        Initializes browser automation, loads data if provided, and executes the program.
         
         Args:
             browser_impl: Browser implementation to use ('playwright' or other supported types)
             headless: Whether to run the browser in headless mode
+            data_file: Optional path to a data file (CSV or JSON) for input data
         
         Returns:
             List of data rows collected during execution
@@ -806,10 +866,29 @@ class Interpreter:
             await self.browser_automation.launch(headless=headless)
             self._log(f"Browser automation launched ({browser_impl}, headless={headless})")
 
-            # Execute the program
-            await self.execute_program(self.ast)
-            self._log(f"Script execution complete - collected {len(self.rows)} data rows")
+            # Load data file if provided
+            if data_file:
+                self.data_rows = self.load_data_file(data_file)
+                self._log(f"Loaded {len(self.data_rows)} data rows from {data_file}")
 
+                # Process each data row
+                for row_idx, data_row in enumerate(self.data_rows):
+                    self._log(f"Processing data row {row_idx+1}/{len(self.data_rows)}")
+                    self.current_data_row = data_row
+                    
+                    # Reset state for this data row
+                    self.current_row = {}
+                    self.element_references = {}
+                    self.foreach_indexes = {}
+                    self.row_state_stack = []
+                    
+                    # Execute the program for this data row
+                    await self.execute_program(self.ast)
+            else:
+                # No data file - execute the script once
+                await self.execute_program(self.ast)
+                
+            self._log(f"Script execution complete - collected {len(self.rows)} data rows")
             return self.rows
         except Exception as e:
             print(f"Script execution failed: {str(e)}")
@@ -819,3 +898,146 @@ class Interpreter:
             if self.browser_automation:
                 await self.browser_automation.cleanup()
                 self._log("Browser resources cleaned up")
+
+    async def execute_data_schema(self, node: ASTNode) -> bool:
+        """
+        Process a data schema declaration block.
+        Defines variables for use with imported data.
+        
+        Returns:
+            True to continue script execution
+        """
+        for var_node in node.children:
+            if var_node.type == NodeType.VARIABLE_DECLARATION:
+                column_name = var_node.column_name
+                var_name = var_node.value  # This is the $variable name
+                
+                # Store the mapping between variable name and column name
+                self.data_schema[var_name] = column_name
+                self._log(f"Defined schema variable: {var_name} -> '{column_name}'")
+        
+        self._log(f"Data schema defined with {len(self.data_schema)} columns")
+        return True
+    
+    async def evaluate_is_empty(self, node: ASTNode) -> bool:
+        """
+        Evaluate if a variable or string value is empty.
+        
+        Returns:
+            True if the value is empty, False otherwise
+        """
+        value = node.value
+        
+        # For strings, always apply variable substitution first
+        if isinstance(value, str):
+            # Apply variable substitution to the string
+            resolved_value = self.substitute_variables(value)
+            
+            # Check if empty (None, empty string, etc.)
+            is_empty = not resolved_value
+            self._log(f"Is_empty check: '{value}' -> '{resolved_value}' -> {is_empty}")
+            return is_empty
+            
+        # For non-string values
+        is_empty = not value
+        self._log(f"Is_empty check: '{value}' -> {is_empty}")
+        return is_empty
+        
+    def resolve_variable(self, var_ref: str) -> Any:
+        """
+        Resolve a $variable reference to its actual value.
+        
+        Args:
+            var_ref: Variable reference (e.g., $url, $category)
+            
+        Returns:
+            The variable's value, or None if not found
+        """
+        if not var_ref.startswith('$'):
+            return var_ref
+            
+        # Check if this variable is in the current data row
+        if var_ref in self.data_schema:
+            column_name = self.data_schema[var_ref]
+            if column_name in self.current_data_row:
+                return self.current_data_row[column_name]
+                
+        # Not found in data
+        return None
+        
+    def substitute_variables(self, text: str) -> str:
+        """
+        Perform variable substitution in text strings.
+        Replaces $variable references with their values anywhere in the text.
+        
+        Args:
+            text: String that may contain $variable references
+            
+        Returns:
+            Text with variables replaced by their values
+        """
+        if not text or '$' not in text:
+            return text
+            
+        # Use regex to find all $variable references in the text
+        pattern = r'(\$[a-zA-Z0-9_]+)'
+        
+        def replace_var(match):
+            var_name = match.group(1)
+            value = self.resolve_variable(var_name)
+            if value is not None:
+                return str(value)
+            return var_name  # Keep original if not found
+        
+        # Replace all variables using regex
+        result = re.sub(pattern, replace_var, text)
+        return result
+
+    def load_data_file(self, file_path: str) -> List[Dict[str, Any]]:
+        """
+        Load data from a CSV or JSON file.
+        
+        Args:
+            file_path: Path to the data file (CSV or JSON)
+            
+        Returns:
+            List of data rows loaded from the file
+        """
+        if file_path.endswith('.csv'):
+            return self.load_csv_file(file_path)
+        elif file_path.endswith('.json'):
+            return self.load_json_file(file_path)
+        else:
+            raise ValueError("Unsupported data file format. Please use .csv or .json files.")
+            
+    def load_csv_file(self, csv_path: str) -> List[Dict[str, Any]]:
+        """Load data from a CSV file."""
+        rows = []
+        try:
+            with open(csv_path, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    rows.append({k: v for k, v in row.items()})
+            self._log(f"Loaded {len(rows)} rows from CSV file: {csv_path}")
+            return rows
+        except Exception as e:
+            raise Exception(f"Failed to load CSV file {csv_path}: {str(e)}")
+            
+    def load_json_file(self, json_path: str) -> List[Dict[str, Any]]:
+        """Load data from a JSON file."""
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                
+            # Handle both array of objects and single object formats
+            if isinstance(data, list):
+                rows = data
+            elif isinstance(data, dict):
+                rows = [data]
+            else:
+                raise ValueError("JSON data must be an object or array of objects")
+                
+            self._log(f"Loaded {len(rows)} rows from JSON file: {json_path}")
+            return rows
+        except Exception as e:
+            raise Exception(f"Failed to load JSON file {json_path}: {str(e)}")

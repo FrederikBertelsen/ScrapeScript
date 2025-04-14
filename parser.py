@@ -40,6 +40,11 @@ class NodeType(Enum):
     CONDITION_AND = auto()
     CONDITION_OR = auto()
     CONDITION_NOT = auto()
+    CONDITION_IS_EMPTY = auto()
+    
+    # Data schema
+    DATA_SCHEMA = auto()
+    VARIABLE_DECLARATION = auto()
 
 # Type alias to facilitate self-referencing ASTNode
 ASTNodeT = TypeVar('ASTNodeT', bound='ASTNode')
@@ -602,6 +607,8 @@ class Parser:
             )
         elif self.current_token.type == TokenType.IDENTIFIER and self.current_token.value == 'exists':
             return self.parse_exists_condition()
+        elif self.current_token.type == TokenType.IS_EMPTY:
+            return self.parse_is_empty_condition()
         else:
             raise SyntaxError(f"Unexpected token in condition: {self.current_token.value}")
     
@@ -700,6 +707,8 @@ class Parser:
             node = self.parse_while_statement()
         elif self.current_token.type == TokenType.SELECT:
             node = self.parse_select()
+        elif self.current_token.type == TokenType.DATA_SCHEMA:
+            node = self.parse_data_schema()
         elif self.current_token.type == TokenType.NEWLINE:
             self.eat(TokenType.NEWLINE)
             return None
@@ -733,3 +742,84 @@ class Parser:
                 root.children.append(statement)
         
         return root
+
+    def parse_data_schema(self) -> ASTNode:
+        """Parse a data_schema declaration block."""
+        token: Token = self.current_token
+        self.eat(TokenType.DATA_SCHEMA)  # Eat 'data_schema'
+        self.skip_newlines()  # Skip newlines after data_schema
+        
+        # Create the data schema node
+        schema_node = ASTNode(
+            type=NodeType.DATA_SCHEMA,
+            line=token.line,
+            column=token.column,
+            children=[]
+        )
+        
+        # Parse variable declarations until end_schema
+        while self.current_token and self.current_token.type != TokenType.END_SCHEMA:
+            if self.current_token.type == TokenType.STRING:
+                # Get the column name
+                column_token = self.current_token
+                column_name = column_token.value
+                self.eat(TokenType.STRING)
+                
+                # Check for optional 'as $variable'
+                var_name = None
+                if self.current_token and self.current_token.type == TokenType.AS:
+                    self.eat(TokenType.AS)
+                    if self.current_token and self.current_token.type == TokenType.VARIABLE:
+                        var_name = self.current_token.value
+                        self.eat(TokenType.VARIABLE)
+                    else:
+                        raise SyntaxError(f"Expected $variable after 'as' at line {column_token.line}")
+                else:
+                    # Auto-convert to $variable_name by replacing spaces with underscores
+                    var_name = '$' + column_name.lower().replace(' ', '_')
+                
+                # Create variable declaration node
+                var_node = ASTNode(
+                    type=NodeType.VARIABLE_DECLARATION,
+                    line=column_token.line,
+                    column=column_token.column,
+                    column_name=column_name,
+                    value=var_name
+                )
+                
+                schema_node.children.append(var_node)
+                
+                # Expect newline after declaration
+                if self.current_token and self.current_token.type != TokenType.NEWLINE:
+                    raise SyntaxError(f"Expected newline after variable declaration at line {column_token.line}")
+                self.skip_newlines()
+            else:
+                raise SyntaxError(f"Expected string literal for column name at line {self.current_token.line}")
+        
+        # Eat end_schema
+        self.eat(TokenType.END_SCHEMA)
+        
+        return schema_node
+
+    def parse_is_empty_condition(self) -> ASTNode:
+        """Parse an 'is_empty' condition."""
+        token: Token = self.current_token
+        self.eat(TokenType.IS_EMPTY)
+        
+        # We expect a variable reference or a string
+        value = None
+        if self.current_token.type == TokenType.VARIABLE:
+            value = self.current_token.value
+            self.eat(TokenType.VARIABLE)
+        elif self.current_token.type == TokenType.STRING:
+            value = self.current_token.value
+            self.eat(TokenType.STRING)
+        else:
+            raise SyntaxError(f"Expected variable or string after is_empty at line {token.line}")
+        
+        return ASTNode(
+            type=NodeType.CONDITION_IS_EMPTY,
+            line=token.line,
+            column=token.column,
+            value=value
+        )

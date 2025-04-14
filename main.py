@@ -15,7 +15,8 @@ async def run_script(
         script_path: str, 
         browser_impl: str = "playwright", 
         headless: bool = False,
-        verbose: bool = False
+        verbose: bool = False,
+        data_file: str = None
         ) -> List[Dict[str, Any]]:
     """Run a ScrapeScript from a file."""
     # Read the script file
@@ -32,7 +33,11 @@ async def run_script(
     
     # Execute the AST
     interpreter = Interpreter(ast, verbose=verbose)
-    results = await interpreter.execute(browser_impl=browser_impl, headless=headless)
+    results = await interpreter.execute(
+        browser_impl=browser_impl, 
+        headless=headless, 
+        data_file=data_file
+    )
     
     return results
 
@@ -63,7 +68,7 @@ def main() -> None:
     parser.add_argument('--browser', default='playwright', choices=available_browsers, help='Browser automation implementation to use')
     parser.add_argument('--headless', action='store_true', help='Run the browser in headless mode')
     parser.add_argument('--single-page', action='store_true', help='Use single-page browser automation')
-
+    parser.add_argument('-d', '--data', help='Path to data file (CSV or JSON) to process with the script')
     
     args = parser.parse_args()
 
@@ -75,7 +80,8 @@ def main() -> None:
         args.script, 
         args.browser, 
         args.headless, 
-        args.verbose
+        args.verbose,
+        args.data
     ))
     
     # Print the results to stdout

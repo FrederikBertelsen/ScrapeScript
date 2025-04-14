@@ -9,6 +9,7 @@ class TokenType(Enum):
     STRING = auto()          # 'text inside quotes'
     NEWLINE = auto()         # Line break
     EOF = auto()             # End of file
+    VARIABLE = auto()        # $variable reference
     
     # Punctuation
     LPAREN = auto()          # (
@@ -35,6 +36,11 @@ class TokenType(Enum):
     # Other keywords
     AS = auto()              # as keyword
     SELECT = auto()          # select keyword
+    
+    # Data schema
+    DATA_SCHEMA = auto()     # data_schema keyword
+    END_SCHEMA = auto()      # end_schema keyword
+    IS_EMPTY = auto()        # is_empty operator
 
 @dataclass
 class Token:
@@ -65,6 +71,11 @@ class Lexer:
         # Other keywords
         'as': TokenType.AS,
         'select': TokenType.SELECT,
+        
+        # Data schema keywords
+        'data_schema': TokenType.DATA_SCHEMA,
+        'end_schema': TokenType.END_SCHEMA,
+        'is_empty': TokenType.IS_EMPTY,
     }
 
     def __init__(self, text: str) -> None:
@@ -155,6 +166,19 @@ class Lexer:
         self.advance()  # Skip the closing quote
         return Token(TokenType.STRING, result, self.line, start_column)
 
+    def variable(self) -> Token:
+        """Read a variable reference starting with $."""
+        result: str = '$'
+        start_column: int = self.column
+        self.advance()  # Skip the $ character
+        
+        # Read the variable name (alphanumeric + underscore)
+        while self.current_char and (self.current_char.isalnum() or self.current_char == '_'):
+            result += self.current_char
+            self.advance()
+            
+        return Token(TokenType.VARIABLE, result, self.line, start_column)
+
     def get_next_token(self) -> Token:
         """Get the next token from the input."""
         while self.current_char:
@@ -173,6 +197,10 @@ class Lexer:
                 token = Token(TokenType.NEWLINE, '\n', self.line, self.column)
                 self.advance()
                 return token
+                
+            # Handle variable references
+            if self.current_char == '$':
+                return self.variable()
                 
             # Handle identifiers (including those starting with @)
             if self.current_char.isalpha() or self.current_char == '_' or self.current_char == '@':
